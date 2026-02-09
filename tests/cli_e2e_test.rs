@@ -1,0 +1,496 @@
+//! End-to-end CLI integration tests for casr.
+//!
+//! Uses `assert_cmd` to invoke the compiled binary and validate output.
+//! All tests use temp directories with env overrides (`CLAUDE_HOME`,
+//! `CODEX_HOME`, `GEMINI_HOME`) so they never touch real provider data.
+
+use std::fs;
+use std::path::PathBuf;
+
+use assert_cmd::Command;
+use predicates::prelude::*;
+use tempfile::TempDir;
+
+/// Root of the fixtures directory.
+fn fixtures_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures")
+}
+
+/// Build a `Command` for the casr binary with isolated provider homes.
+///
+/// Sets `CLAUDE_HOME`, `CODEX_HOME`, `GEMINI_HOME` to subdirs of the
+/// provided temp dir so the CLI never touches real provider data.
+fn casr_cmd(tmp: &TempDir) -> Command {
+    #[allow(deprecated)]
+    let mut cmd = Command::cargo_bin("casr").expect("casr binary should be built");
+    cmd.env("CLAUDE_HOME", tmp.path().join("claude"))
+        .env("CODEX_HOME", tmp.path().join("codex"))
+        .env("GEMINI_HOME", tmp.path().join("gemini"))
+        // Suppress colored output in tests.
+        .env("NO_COLOR", "1");
+    cmd
+}
+
+/// Set up a Claude Code session fixture in the temp dir.
+///
+/// Creates the expected directory structure:
+/// `<claude_home>/projects/<project-key>/<session-id>.jsonl`
+fn setup_cc_fixture(tmp: &TempDir, fixture_name: &str) -> String {
+    let source = fixtures_dir().join(format!("claude_code/{fixture_name}.jsonl"));
+    let content = fs::read_to_string(&source)
+        .unwrap_or_else(|e| panic!("Failed to read fixture {fixture_name}: {e}"));
+
+    // Extract session ID and cwd from the fixture content.
+    let first_line: serde_json::Value = content
+        .lines()
+        .find(|l| !l.trim().is_empty())
+        .and_then(|l| serde_json::from_str(l).ok())
+        .expect("fixture should have valid first line");
+
+    let session_id = first_line["sessionId"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
+    let cwd = first_line["cwd"].as_str().unwrap_or("/tmp");
+
+    // Derive project key: replace non-alphanumeric with dash.
+    let project_key: String = cwd
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '-' })
+        .collect();
+
+    let projects_dir = tmp.path().join("claude/projects").join(&project_key);
+    fs::create_dir_all(&projects_dir).expect("create CC project dir");
+
+    let target_path = projects_dir.join(format!("{session_id}.jsonl"));
+    fs::write(&target_path, &content).expect("write CC fixture");
+
+    session_id
+}
+
+/// Set up a Codex session fixture in the temp dir.
+#[allow(dead_code)]
+fn setup_codex_fixture(tmp: &TempDir, fixture_name: &str, ext: &str) -> String {
+    let source = fixtures_dir().join(format!("codex/{fixture_name}.{ext}"));
+    let content = fs::read_to_string(&source)
+        .unwrap_or_else(|e| panic!("Failed to read fixture {fixture_name}: {e}"));
+
+    // For JSONL, extract session ID from session_meta payload.
+    let session_id = if ext == "jsonl" {
+        content
+            .lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+            .find(|v| v["type"] == "session_meta")
+            .and_then(|v| v["payload"]["id"].as_str().map(String::from))
+            .unwrap_or_else(|| "unknown".to_string())
+    } else {
+        // Legacy JSON.
+        let root: serde_json::Value = serde_json::from_str(&content).unwrap();
+        root["session"]["id"]
+            .as_str()
+            .unwrap_or("unknown")
+            .to_string()
+    };
+
+    // Place in sessions dir with correct hierarchy.
+    let sessions_dir = tmp.path().join("codex/sessions/2026/01/01");
+    fs::create_dir_all(&sessions_dir).expect("create Codex sessions dir");
+
+    let filename = format!("rollout-2026-01-01T00-00-00-{session_id}.{ext}");
+    let target_path = sessions_dir.join(&filename);
+    fs::write(&target_path, &content).expect("write Codex fixture");
+
+    session_id
+}
+
+/// Set up a Gemini session fixture in the temp dir.
+#[allow(dead_code)]
+fn setup_gemini_fixture(tmp: &TempDir, fixture_name: &str) -> String {
+    let source = fixtures_dir().join(format!("gemini/{fixture_name}.json"));
+    let content = fs::read_to_string(&source)
+        .unwrap_or_else(|e| panic!("Failed to read fixture {fixture_name}: {e}"));
+
+    let root: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let session_id = root["sessionId"].as_str().unwrap_or("unknown").to_string();
+
+    // Place in <hash>/chats/ directory.
+    let hash_dir = tmp.path().join("gemini/tmp/testhash123/chats");
+    fs::create_dir_all(&hash_dir).expect("create Gemini chats dir");
+
+    let filename = format!("session-{session_id}.json");
+    let target_path = hash_dir.join(&filename);
+    fs::write(&target_path, &content).expect("write Gemini fixture");
+
+    session_id
+}
+
+// ---------------------------------------------------------------------------
+// Basic CLI tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cli_version_outputs_metadata() {
+    let tmp = TempDir::new().unwrap();
+    casr_cmd(&tmp)
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("casr"));
+}
+
+#[test]
+fn cli_help_outputs_usage() {
+    let tmp = TempDir::new().unwrap();
+    casr_cmd(&tmp)
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Cross Agent Session Resumer"))
+        .stdout(predicate::str::contains("resume"))
+        .stdout(predicate::str::contains("list"))
+        .stdout(predicate::str::contains("providers"));
+}
+
+#[test]
+fn cli_no_args_shows_error() {
+    let tmp = TempDir::new().unwrap();
+    casr_cmd(&tmp)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Usage"));
+}
+
+#[test]
+fn cli_invalid_subcommand_fails() {
+    let tmp = TempDir::new().unwrap();
+    casr_cmd(&tmp).arg("nonexistent").assert().failure();
+}
+
+// ---------------------------------------------------------------------------
+// Providers command
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cli_providers_succeeds() {
+    let tmp = TempDir::new().unwrap();
+    casr_cmd(&tmp)
+        .arg("providers")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Claude Code"))
+        .stdout(predicate::str::contains("Codex"))
+        .stdout(predicate::str::contains("Gemini"));
+}
+
+#[test]
+fn cli_providers_json_is_valid() {
+    let tmp = TempDir::new().unwrap();
+    let output = casr_cmd(&tmp)
+        .args(["--json", "providers"])
+        .output()
+        .expect("providers should run");
+
+    assert!(output.status.success(), "providers --json should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("providers --json should emit valid JSON");
+    assert!(parsed.is_array(), "providers JSON should be an array");
+}
+
+// ---------------------------------------------------------------------------
+// List command
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cli_list_empty_shows_helpful_message() {
+    let tmp = TempDir::new().unwrap();
+    casr_cmd(&tmp)
+        .arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No sessions found"));
+}
+
+#[test]
+fn cli_list_finds_cc_sessions() {
+    let tmp = TempDir::new().unwrap();
+    let session_id = setup_cc_fixture(&tmp, "cc_simple");
+    casr_cmd(&tmp)
+        .arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&session_id));
+}
+
+#[test]
+fn cli_list_json_is_valid_array() {
+    let tmp = TempDir::new().unwrap();
+    setup_cc_fixture(&tmp, "cc_simple");
+    let output = casr_cmd(&tmp)
+        .args(["--json", "list"])
+        .output()
+        .expect("list should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("list --json should emit valid JSON");
+    assert!(parsed.is_array());
+    assert!(!parsed.as_array().unwrap().is_empty());
+}
+
+#[test]
+fn cli_list_limit_respects_bound() {
+    let tmp = TempDir::new().unwrap();
+    setup_cc_fixture(&tmp, "cc_simple");
+    setup_cc_fixture(&tmp, "cc_malformed");
+    let output = casr_cmd(&tmp)
+        .args(["--json", "list", "--limit", "1"])
+        .output()
+        .expect("list should run");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    assert_eq!(parsed.as_array().unwrap().len(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// Info command
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cli_info_shows_session_details() {
+    let tmp = TempDir::new().unwrap();
+    let session_id = setup_cc_fixture(&tmp, "cc_simple");
+    casr_cmd(&tmp)
+        .args(["info", &session_id])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&session_id))
+        .stdout(predicate::str::contains("claude-code"))
+        .stdout(predicate::str::contains("Messages:"));
+}
+
+#[test]
+fn cli_info_json_is_valid() {
+    let tmp = TempDir::new().unwrap();
+    let session_id = setup_cc_fixture(&tmp, "cc_simple");
+    let output = casr_cmd(&tmp)
+        .args(["--json", "info", &session_id])
+        .output()
+        .expect("info should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("info --json should emit valid JSON");
+    assert_eq!(parsed["session_id"].as_str().unwrap(), session_id);
+    assert_eq!(parsed["provider"].as_str().unwrap(), "claude-code");
+}
+
+#[test]
+fn cli_info_unknown_session_fails() {
+    let tmp = TempDir::new().unwrap();
+    casr_cmd(&tmp)
+        .args(["info", "nonexistent-session-id"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Error"));
+}
+
+#[test]
+fn cli_info_unknown_session_json_error() {
+    let tmp = TempDir::new().unwrap();
+    let output = casr_cmd(&tmp)
+        .args(["--json", "info", "nonexistent-session-id"])
+        .output()
+        .expect("info should run");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stderr).expect("JSON error should be valid JSON");
+    assert_eq!(parsed["ok"], false);
+    assert!(parsed["error_type"].as_str().is_some());
+}
+
+// ---------------------------------------------------------------------------
+// Resume command
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cli_resume_dry_run_does_not_write() {
+    let tmp = TempDir::new().unwrap();
+    let session_id = setup_cc_fixture(&tmp, "cc_simple");
+
+    // Resume CC→Codex with dry run.
+    casr_cmd(&tmp)
+        .args(["resume", "cod", &session_id, "--dry-run"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Would convert"));
+
+    // Verify no Codex session files were written.
+    let codex_sessions = tmp.path().join("codex/sessions");
+    if codex_sessions.exists() {
+        let entries: Vec<_> = walkdir::WalkDir::new(&codex_sessions)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_file())
+            .collect();
+        assert!(
+            entries.is_empty(),
+            "Dry run should not write any files, but found: {:?}",
+            entries
+        );
+    }
+}
+
+#[test]
+fn cli_resume_writes_target_session() {
+    let tmp = TempDir::new().unwrap();
+    let session_id = setup_cc_fixture(&tmp, "cc_simple");
+
+    // Resume CC→Codex (actual write).
+    casr_cmd(&tmp)
+        .args(["resume", "cod", &session_id])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Converted"))
+        .stdout(predicate::str::contains("claude-code"))
+        .stdout(predicate::str::contains("codex"))
+        .stdout(predicate::str::contains("Resume:"));
+
+    // Verify a Codex session file was written.
+    let codex_sessions = tmp.path().join("codex/sessions");
+    assert!(
+        codex_sessions.exists(),
+        "Codex sessions dir should exist after conversion"
+    );
+    let files: Vec<_> = walkdir::WalkDir::new(&codex_sessions)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+        .collect();
+    assert_eq!(
+        files.len(),
+        1,
+        "Exactly one Codex session file should be written"
+    );
+}
+
+#[test]
+fn cli_resume_json_output_is_valid() {
+    let tmp = TempDir::new().unwrap();
+    let session_id = setup_cc_fixture(&tmp, "cc_simple");
+
+    let output = casr_cmd(&tmp)
+        .args(["--json", "resume", "cod", &session_id, "--dry-run"])
+        .output()
+        .expect("resume should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("resume --json should emit valid JSON");
+    assert_eq!(parsed["ok"], true);
+    assert_eq!(parsed["source_provider"].as_str().unwrap(), "claude-code");
+    assert_eq!(parsed["target_provider"].as_str().unwrap(), "codex");
+    assert_eq!(parsed["dry_run"], true);
+}
+
+#[test]
+fn cli_resume_unknown_target_fails() {
+    let tmp = TempDir::new().unwrap();
+    let session_id = setup_cc_fixture(&tmp, "cc_simple");
+
+    casr_cmd(&tmp)
+        .args(["resume", "nonexistent", &session_id])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Error"));
+}
+
+#[test]
+fn cli_resume_unknown_session_fails() {
+    let tmp = TempDir::new().unwrap();
+    casr_cmd(&tmp)
+        .args(["resume", "cod", "nonexistent-session"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Error"));
+}
+
+#[test]
+fn cli_resume_cc_to_gemini_works() {
+    let tmp = TempDir::new().unwrap();
+    let session_id = setup_cc_fixture(&tmp, "cc_simple");
+
+    casr_cmd(&tmp)
+        .args(["resume", "gmi", &session_id])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Converted"))
+        .stdout(predicate::str::contains("gemini"));
+
+    // Verify Gemini file was written.
+    let gemini_tmp = tmp.path().join("gemini/tmp");
+    assert!(gemini_tmp.exists());
+    let files: Vec<_> = walkdir::WalkDir::new(&gemini_tmp)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| {
+            e.file_type().is_file() && e.path().extension().is_some_and(|ext| ext == "json")
+        })
+        .collect();
+    assert_eq!(
+        files.len(),
+        1,
+        "Exactly one Gemini session file should be written"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Completions command
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cli_completions_bash() {
+    let tmp = TempDir::new().unwrap();
+    casr_cmd(&tmp)
+        .args(["completions", "bash"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("casr"));
+}
+
+#[test]
+fn cli_completions_invalid_shell() {
+    let tmp = TempDir::new().unwrap();
+    casr_cmd(&tmp)
+        .args(["completions", "ksh"])
+        .assert()
+        .failure();
+}
+
+// ---------------------------------------------------------------------------
+// Verbose / trace flags
+// ---------------------------------------------------------------------------
+
+#[test]
+fn cli_verbose_flag_accepted() {
+    let tmp = TempDir::new().unwrap();
+    casr_cmd(&tmp)
+        .args(["--verbose", "providers"])
+        .assert()
+        .success();
+}
+
+#[test]
+fn cli_trace_flag_accepted() {
+    let tmp = TempDir::new().unwrap();
+    casr_cmd(&tmp)
+        .args(["--trace", "providers"])
+        .assert()
+        .success();
+}

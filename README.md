@@ -366,6 +366,17 @@ cargo test
 bash scripts/e2e_test.sh
 ```
 
+### Opt-In Real-Provider Smoke Harness
+
+```bash
+bash scripts/real_provider_smoke.sh
+```
+
+Notes:
+- Uses real provider CLIs and real provider homes (`CLAUDE_HOME`, `CODEX_HOME`, `GEMINI_HOME`).
+- Explicitly reports `PASS`/`FAIL`/`SKIP` for each core path: `CC<->Codex`, `CC<->Gemini`, `Codex<->Gemini`.
+- Writes detailed artifacts (command transcript, per-path stdout/stderr, matrix) under `artifacts/real-smoke/<timestamp>/`.
+
 Test suite coverage includes:
 - Reader and writer tests for all provider adapters.
 - Canonical model helper tests (`flatten_content`, `parse_timestamp`, etc.).

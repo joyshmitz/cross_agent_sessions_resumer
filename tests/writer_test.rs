@@ -1,0 +1,984 @@
+//! Writer integration tests for all three providers.
+//!
+//! Tests `write_session()` → `read_session()` round-trip compatibility and
+//! provider-specific output shape conformance.
+//!
+//! Each provider's tests are serialized via a per-provider Mutex because
+//! `write_session()` reads environment variables (`CLAUDE_HOME`, `CODEX_HOME`,
+//! `GEMINI_HOME`) to determine the target directory. Using separate mutexes
+//! allows cross-provider parallelism while preventing intra-provider races.
+
+use std::path::PathBuf;
+use std::sync::{LazyLock, Mutex};
+
+use casr::model::{CanonicalMessage, CanonicalSession, MessageRole, ToolCall};
+use casr::providers::claude_code::ClaudeCode;
+use casr::providers::codex::Codex;
+use casr::providers::gemini::Gemini;
+use casr::providers::{Provider, WriteOptions};
+
+// ---------------------------------------------------------------------------
+// Env var isolation — one Mutex per provider for cross-provider parallelism
+// ---------------------------------------------------------------------------
+
+static CC_ENV: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+static CODEX_ENV: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+static GEMINI_ENV: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+/// RAII guard that sets an env var and restores the original value on drop.
+struct EnvGuard {
+    key: &'static str,
+    original: Option<String>,
+}
+
+impl EnvGuard {
+    fn set(key: &'static str, value: &std::path::Path) -> Self {
+        let original = std::env::var(key).ok();
+        // SAFETY: Protected by per-provider Mutex; no concurrent modification
+        // of the same env var. Reader unit tests don't depend on these env vars
+        // (they pass paths directly to read_session).
+        unsafe { std::env::set_var(key, value) };
+        Self { key, original }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        match &self.original {
+            // SAFETY: Same Mutex protects the restore.
+            Some(val) => unsafe { std::env::set_var(self.key, val) },
+            None => unsafe { std::env::remove_var(self.key) },
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Test session builders
+// ---------------------------------------------------------------------------
+
+fn simple_msg(idx: usize, role: MessageRole, content: &str, ts: i64) -> CanonicalMessage {
+    CanonicalMessage {
+        idx,
+        role,
+        content: content.to_string(),
+        timestamp: Some(ts),
+        author: None,
+        tool_calls: vec![],
+        tool_results: vec![],
+        extra: serde_json::Value::Null,
+    }
+}
+
+fn assistant_msg(idx: usize, content: &str, ts: i64, model: &str) -> CanonicalMessage {
+    let mut m = simple_msg(idx, MessageRole::Assistant, content, ts);
+    m.author = Some(model.to_string());
+    m
+}
+
+/// Session with 4 text-only messages (clean roundtrip expected for all providers).
+fn simple_session() -> CanonicalSession {
+    CanonicalSession {
+        session_id: "src-simple".to_string(),
+        provider_slug: "test-source".to_string(),
+        workspace: Some(PathBuf::from("/data/projects/myapp")),
+        title: Some("Fix the login bug".to_string()),
+        started_at: Some(1_700_000_000_000),
+        ended_at: Some(1_700_000_010_000),
+        messages: vec![
+            simple_msg(0, MessageRole::User, "Fix the login bug", 1_700_000_000_000),
+            assistant_msg(1, "I'll fix that now.", 1_700_000_005_000, "claude-3-opus"),
+            simple_msg(
+                2,
+                MessageRole::User,
+                "Also check the tests",
+                1_700_000_007_000,
+            ),
+            assistant_msg(3, "Tests are passing.", 1_700_000_010_000, "claude-3-opus"),
+        ],
+        metadata: serde_json::json!({"source": "test"}),
+        source_path: PathBuf::from("/tmp/source.jsonl"),
+        model_name: Some("claude-3-opus".to_string()),
+    }
+}
+
+/// Session with a tool call in the assistant message.
+fn tool_call_session() -> CanonicalSession {
+    let mut session = simple_session();
+    session.messages[1].tool_calls = vec![ToolCall {
+        id: Some("tc-1".to_string()),
+        name: "Read".to_string(),
+        arguments: serde_json::json!({"file_path": "src/auth.rs"}),
+    }];
+    session
+}
+
+// ===========================================================================
+// Claude Code writer tests
+// ===========================================================================
+
+#[test]
+fn writer_cc_roundtrip() {
+    let _lock = CC_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CLAUDE_HOME", tmp.path());
+
+    let session = simple_session();
+    let written = ClaudeCode
+        .write_session(&session, &WriteOptions { force: false })
+        .expect("CC write_session should succeed");
+
+    assert_eq!(written.paths.len(), 1, "CC should produce exactly one file");
+    assert!(written.paths[0].exists(), "CC output file should exist");
+    assert!(
+        written.resume_command.starts_with("claude --resume"),
+        "CC resume command format"
+    );
+
+    let readback = ClaudeCode
+        .read_session(&written.paths[0])
+        .expect("CC read_session should parse written output");
+
+    assert_eq!(
+        readback.messages.len(),
+        session.messages.len(),
+        "CC roundtrip: message count"
+    );
+    for (i, (orig, rb)) in session
+        .messages
+        .iter()
+        .zip(readback.messages.iter())
+        .enumerate()
+    {
+        assert_eq!(orig.role, rb.role, "CC roundtrip msg {i}: role mismatch");
+        assert_eq!(
+            orig.content, rb.content,
+            "CC roundtrip msg {i}: content mismatch"
+        );
+    }
+    assert_eq!(
+        readback.workspace, session.workspace,
+        "CC roundtrip: workspace"
+    );
+    assert!(
+        readback.model_name.is_some(),
+        "CC roundtrip: model_name should survive"
+    );
+}
+
+#[test]
+fn writer_cc_output_valid_jsonl() {
+    let _lock = CC_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CLAUDE_HOME", tmp.path());
+
+    let written = ClaudeCode
+        .write_session(&simple_session(), &WriteOptions { force: false })
+        .unwrap();
+
+    let content = std::fs::read_to_string(&written.paths[0]).unwrap();
+    let lines: Vec<&str> = content.lines().collect();
+    assert_eq!(lines.len(), 4, "CC should write one line per message");
+    for (i, line) in lines.iter().enumerate() {
+        let _: serde_json::Value = serde_json::from_str(line)
+            .unwrap_or_else(|e| panic!("CC line {i} not valid JSON: {e}\nContent: {line}"));
+    }
+}
+
+#[test]
+fn writer_cc_entries_have_required_fields() {
+    let _lock = CC_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CLAUDE_HOME", tmp.path());
+
+    let written = ClaudeCode
+        .write_session(&simple_session(), &WriteOptions { force: false })
+        .unwrap();
+
+    let content = std::fs::read_to_string(&written.paths[0]).unwrap();
+    for (i, line) in content.lines().enumerate() {
+        let entry: serde_json::Value = serde_json::from_str(line).unwrap();
+        for field in [
+            "sessionId",
+            "type",
+            "message",
+            "uuid",
+            "timestamp",
+            "parentUuid",
+            "cwd",
+        ] {
+            assert!(
+                entry.get(field).is_some(),
+                "CC line {i}: missing required field '{field}'"
+            );
+        }
+        let entry_type = entry["type"].as_str().unwrap();
+        assert!(
+            entry_type == "user" || entry_type == "assistant",
+            "CC line {i}: unexpected type '{entry_type}'"
+        );
+    }
+}
+
+#[test]
+fn writer_cc_parent_uuid_chain() {
+    let _lock = CC_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CLAUDE_HOME", tmp.path());
+
+    let written = ClaudeCode
+        .write_session(&simple_session(), &WriteOptions { force: false })
+        .unwrap();
+
+    let content = std::fs::read_to_string(&written.paths[0]).unwrap();
+    let entries: Vec<serde_json::Value> = content
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+
+    // First entry: parentUuid is null.
+    assert!(
+        entries[0]["parentUuid"].is_null(),
+        "CC first entry parentUuid should be null"
+    );
+
+    // Subsequent entries: parentUuid == previous entry's uuid.
+    for i in 1..entries.len() {
+        let expected = entries[i - 1]["uuid"].as_str().unwrap();
+        let actual = entries[i]["parentUuid"].as_str().unwrap();
+        assert_eq!(
+            actual, expected,
+            "CC entry {i}: parentUuid should chain to previous uuid"
+        );
+    }
+}
+
+#[test]
+fn writer_cc_workspace_directory_placement() {
+    let _lock = CC_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CLAUDE_HOME", tmp.path());
+
+    let session = simple_session(); // workspace: /data/projects/myapp
+    let written = ClaudeCode
+        .write_session(&session, &WriteOptions { force: false })
+        .unwrap();
+
+    let path = &written.paths[0];
+    // File should be under <CLAUDE_HOME>/projects/-data-projects-myapp/<uuid>.jsonl
+    let expected_dir_key = "-data-projects-myapp";
+    let parent = path.parent().unwrap();
+    assert!(
+        parent.ends_with(expected_dir_key),
+        "CC file should be under project dir key '{expected_dir_key}', got: {}",
+        parent.display()
+    );
+    assert!(
+        path.extension().is_some_and(|e| e == "jsonl"),
+        "CC file should have .jsonl extension"
+    );
+}
+
+#[test]
+fn writer_cc_timestamps_are_rfc3339() {
+    let _lock = CC_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CLAUDE_HOME", tmp.path());
+
+    let written = ClaudeCode
+        .write_session(&simple_session(), &WriteOptions { force: false })
+        .unwrap();
+
+    let content = std::fs::read_to_string(&written.paths[0]).unwrap();
+    for (i, line) in content.lines().enumerate() {
+        let entry: serde_json::Value = serde_json::from_str(line).unwrap();
+        let ts_str = entry["timestamp"]
+            .as_str()
+            .unwrap_or_else(|| panic!("CC line {i}: timestamp should be a string"));
+        chrono::DateTime::parse_from_rfc3339(ts_str)
+            .unwrap_or_else(|e| panic!("CC line {i}: timestamp '{ts_str}' not valid RFC3339: {e}"));
+    }
+}
+
+#[test]
+fn writer_cc_tool_calls_in_assistant_content() {
+    let _lock = CC_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CLAUDE_HOME", tmp.path());
+
+    let written = ClaudeCode
+        .write_session(&tool_call_session(), &WriteOptions { force: false })
+        .unwrap();
+
+    let content = std::fs::read_to_string(&written.paths[0]).unwrap();
+    let entries: Vec<serde_json::Value> = content
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+
+    // Entry 1 is the assistant with a tool call.
+    let assistant_entry = &entries[1];
+    assert_eq!(assistant_entry["type"], "assistant");
+    let msg_content = &assistant_entry["message"]["content"];
+    let blocks = msg_content
+        .as_array()
+        .expect("CC assistant content should be array of blocks");
+
+    let has_text = blocks.iter().any(|b| b["type"] == "text");
+    let has_tool_use = blocks.iter().any(|b| b["type"] == "tool_use");
+    assert!(has_text, "CC assistant content should contain text block");
+    assert!(
+        has_tool_use,
+        "CC assistant content should contain tool_use block"
+    );
+
+    let tool_block = blocks.iter().find(|b| b["type"] == "tool_use").unwrap();
+    assert_eq!(tool_block["name"], "Read");
+    assert_eq!(tool_block["id"], "tc-1");
+}
+
+#[test]
+fn writer_cc_model_name_on_assistant_entries() {
+    let _lock = CC_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CLAUDE_HOME", tmp.path());
+
+    let written = ClaudeCode
+        .write_session(&simple_session(), &WriteOptions { force: false })
+        .unwrap();
+
+    let content = std::fs::read_to_string(&written.paths[0]).unwrap();
+    for (i, line) in content.lines().enumerate() {
+        let entry: serde_json::Value = serde_json::from_str(line).unwrap();
+        if entry["type"] == "assistant" {
+            assert!(
+                entry["message"]["model"].is_string(),
+                "CC assistant entry {i} should have message.model"
+            );
+        }
+    }
+}
+
+// ===========================================================================
+// Codex writer tests
+// ===========================================================================
+
+#[test]
+fn writer_codex_roundtrip() {
+    let _lock = CODEX_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CODEX_HOME", tmp.path());
+
+    let session = simple_session();
+    let written = Codex
+        .write_session(&session, &WriteOptions { force: false })
+        .expect("Codex write_session should succeed");
+
+    assert_eq!(
+        written.paths.len(),
+        1,
+        "Codex should produce exactly one file"
+    );
+    assert!(written.paths[0].exists(), "Codex output file should exist");
+    assert!(
+        written.resume_command.starts_with("codex resume"),
+        "Codex resume command format"
+    );
+
+    let readback = Codex
+        .read_session(&written.paths[0])
+        .expect("Codex read_session should parse written output");
+
+    assert_eq!(
+        readback.messages.len(),
+        session.messages.len(),
+        "Codex roundtrip: message count"
+    );
+    for (i, (orig, rb)) in session
+        .messages
+        .iter()
+        .zip(readback.messages.iter())
+        .enumerate()
+    {
+        assert_eq!(orig.role, rb.role, "Codex roundtrip msg {i}: role mismatch");
+        assert_eq!(
+            orig.content, rb.content,
+            "Codex roundtrip msg {i}: content mismatch"
+        );
+    }
+    assert_eq!(
+        readback.workspace, session.workspace,
+        "Codex roundtrip: workspace"
+    );
+}
+
+#[test]
+fn writer_codex_output_valid_jsonl() {
+    let _lock = CODEX_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CODEX_HOME", tmp.path());
+
+    let written = Codex
+        .write_session(&simple_session(), &WriteOptions { force: false })
+        .unwrap();
+
+    let content = std::fs::read_to_string(&written.paths[0]).unwrap();
+    let lines: Vec<&str> = content.lines().collect();
+    // session_meta + 4 messages (2 user event_msg + 2 assistant response_item)
+    assert_eq!(
+        lines.len(),
+        5,
+        "Codex should write session_meta + 4 message lines"
+    );
+    for (i, line) in lines.iter().enumerate() {
+        let _: serde_json::Value = serde_json::from_str(line)
+            .unwrap_or_else(|e| panic!("Codex line {i} not valid JSON: {e}\nContent: {line}"));
+    }
+}
+
+#[test]
+fn writer_codex_session_meta_is_first_line() {
+    let _lock = CODEX_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CODEX_HOME", tmp.path());
+
+    let written = Codex
+        .write_session(&simple_session(), &WriteOptions { force: false })
+        .unwrap();
+
+    let content = std::fs::read_to_string(&written.paths[0]).unwrap();
+    let first_line: serde_json::Value =
+        serde_json::from_str(content.lines().next().unwrap()).unwrap();
+
+    assert_eq!(
+        first_line["type"], "session_meta",
+        "Codex first line should be session_meta"
+    );
+    assert!(
+        first_line["payload"]["id"].as_str().is_some(),
+        "session_meta should have payload.id"
+    );
+    assert_eq!(
+        first_line["payload"]["cwd"], "/data/projects/myapp",
+        "session_meta should have correct cwd"
+    );
+}
+
+#[test]
+fn writer_codex_user_messages_are_event_msg() {
+    let _lock = CODEX_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CODEX_HOME", tmp.path());
+
+    let written = Codex
+        .write_session(&simple_session(), &WriteOptions { force: false })
+        .unwrap();
+
+    let content = std::fs::read_to_string(&written.paths[0]).unwrap();
+    let lines: Vec<serde_json::Value> = content
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+
+    let user_events: Vec<&serde_json::Value> = lines
+        .iter()
+        .filter(|l| l["type"] == "event_msg" && l["payload"]["type"] == "user_message")
+        .collect();
+    assert_eq!(
+        user_events.len(),
+        2,
+        "Codex should have 2 user event_msg lines"
+    );
+    assert_eq!(user_events[0]["payload"]["message"], "Fix the login bug");
+    assert_eq!(user_events[1]["payload"]["message"], "Also check the tests");
+}
+
+#[test]
+fn writer_codex_assistant_messages_are_response_item() {
+    let _lock = CODEX_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CODEX_HOME", tmp.path());
+
+    let written = Codex
+        .write_session(&simple_session(), &WriteOptions { force: false })
+        .unwrap();
+
+    let content = std::fs::read_to_string(&written.paths[0]).unwrap();
+    let lines: Vec<serde_json::Value> = content
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+
+    let response_items: Vec<&serde_json::Value> = lines
+        .iter()
+        .filter(|l| l["type"] == "response_item")
+        .collect();
+    assert_eq!(
+        response_items.len(),
+        2,
+        "Codex should have 2 response_item lines"
+    );
+    assert_eq!(response_items[0]["payload"]["role"], "assistant");
+    assert_eq!(response_items[1]["payload"]["role"], "assistant");
+}
+
+#[test]
+fn writer_codex_reasoning_messages() {
+    let _lock = CODEX_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CODEX_HOME", tmp.path());
+
+    let mut session = simple_session();
+    // Replace second assistant message with a reasoning message.
+    session.messages[3] = CanonicalMessage {
+        idx: 3,
+        role: MessageRole::Assistant,
+        content: "Thinking about the tests...".to_string(),
+        timestamp: Some(1_700_000_010_000),
+        author: Some("reasoning".to_string()),
+        tool_calls: vec![],
+        tool_results: vec![],
+        extra: serde_json::Value::Null,
+    };
+
+    let written = Codex
+        .write_session(&session, &WriteOptions { force: false })
+        .unwrap();
+
+    let content = std::fs::read_to_string(&written.paths[0]).unwrap();
+    let lines: Vec<serde_json::Value> = content
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+
+    let reasoning_events: Vec<&serde_json::Value> = lines
+        .iter()
+        .filter(|l| l["type"] == "event_msg" && l["payload"]["type"] == "agent_reasoning")
+        .collect();
+    assert_eq!(
+        reasoning_events.len(),
+        1,
+        "Codex should have 1 agent_reasoning event"
+    );
+    assert_eq!(
+        reasoning_events[0]["payload"]["text"],
+        "Thinking about the tests..."
+    );
+}
+
+#[test]
+fn writer_codex_timestamps_are_numeric() {
+    let _lock = CODEX_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CODEX_HOME", tmp.path());
+
+    let written = Codex
+        .write_session(&simple_session(), &WriteOptions { force: false })
+        .unwrap();
+
+    let content = std::fs::read_to_string(&written.paths[0]).unwrap();
+    for (i, line) in content.lines().enumerate() {
+        let entry: serde_json::Value = serde_json::from_str(line).unwrap();
+        let ts = entry
+            .get("timestamp")
+            .unwrap_or_else(|| panic!("Codex line {i}: missing timestamp"));
+        assert!(
+            ts.is_f64() || ts.is_i64() || ts.is_u64(),
+            "Codex line {i}: timestamp should be numeric, got: {ts}"
+        );
+    }
+}
+
+#[test]
+fn writer_codex_date_hierarchy_in_path() {
+    let _lock = CODEX_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CODEX_HOME", tmp.path());
+
+    let written = Codex
+        .write_session(&simple_session(), &WriteOptions { force: false })
+        .unwrap();
+
+    let path_str = written.paths[0].to_string_lossy().to_string();
+    let components: Vec<&str> = path_str.split('/').collect();
+
+    // Should contain "sessions" directory.
+    let sessions_idx = components
+        .iter()
+        .position(|c| *c == "sessions")
+        .expect("Codex path should contain 'sessions'");
+
+    // After "sessions": year/month/day/file.
+    assert!(
+        components.len() > sessions_idx + 4,
+        "Codex path should have year/month/day/file after sessions/"
+    );
+
+    let year = components[sessions_idx + 1];
+    assert!(
+        year.len() == 4 && year.chars().all(|c| c.is_ascii_digit()),
+        "Codex path year should be 4 digits, got '{year}'"
+    );
+    let month = components[sessions_idx + 2];
+    assert!(
+        month.len() == 2 && month.chars().all(|c| c.is_ascii_digit()),
+        "Codex path month should be 2 digits, got '{month}'"
+    );
+    let day = components[sessions_idx + 3];
+    assert!(
+        day.len() == 2 && day.chars().all(|c| c.is_ascii_digit()),
+        "Codex path day should be 2 digits, got '{day}'"
+    );
+
+    let filename = components.last().unwrap();
+    assert!(
+        filename.starts_with("rollout-"),
+        "Codex filename should start with 'rollout-'"
+    );
+    assert!(
+        filename.ends_with(".jsonl"),
+        "Codex filename should end with '.jsonl'"
+    );
+}
+
+#[test]
+fn writer_codex_tool_calls_in_response_content() {
+    let _lock = CODEX_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CODEX_HOME", tmp.path());
+
+    let written = Codex
+        .write_session(&tool_call_session(), &WriteOptions { force: false })
+        .unwrap();
+
+    let content = std::fs::read_to_string(&written.paths[0]).unwrap();
+    let lines: Vec<serde_json::Value> = content
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+
+    let response_items: Vec<&serde_json::Value> = lines
+        .iter()
+        .filter(|l| l["type"] == "response_item")
+        .collect();
+
+    // First response_item should have tool_use in its content blocks.
+    let first_content = response_items[0]["payload"]["content"]
+        .as_array()
+        .expect("Codex response_item content should be array");
+    let has_tool_use = first_content.iter().any(|b| b["type"] == "tool_use");
+    assert!(
+        has_tool_use,
+        "Codex response_item should contain tool_use block"
+    );
+}
+
+// ===========================================================================
+// Gemini writer tests
+// ===========================================================================
+
+#[test]
+fn writer_gemini_roundtrip() {
+    let _lock = GEMINI_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("GEMINI_HOME", tmp.path());
+
+    let session = simple_session();
+    let written = Gemini
+        .write_session(&session, &WriteOptions { force: false })
+        .expect("Gemini write_session should succeed");
+
+    assert_eq!(
+        written.paths.len(),
+        1,
+        "Gemini should produce exactly one file"
+    );
+    assert!(written.paths[0].exists(), "Gemini output file should exist");
+    assert!(
+        written.resume_command.starts_with("gemini --resume"),
+        "Gemini resume command format"
+    );
+
+    let readback = Gemini
+        .read_session(&written.paths[0])
+        .expect("Gemini read_session should parse written output");
+
+    assert_eq!(
+        readback.messages.len(),
+        session.messages.len(),
+        "Gemini roundtrip: message count"
+    );
+    for (i, (orig, rb)) in session
+        .messages
+        .iter()
+        .zip(readback.messages.iter())
+        .enumerate()
+    {
+        assert_eq!(
+            orig.role, rb.role,
+            "Gemini roundtrip msg {i}: role mismatch"
+        );
+        assert_eq!(
+            orig.content, rb.content,
+            "Gemini roundtrip msg {i}: content mismatch"
+        );
+    }
+    // Gemini workspace is derived from message content heuristics,
+    // not stored explicitly. With simple text messages, it won't survive.
+}
+
+#[test]
+fn writer_gemini_output_valid_json() {
+    let _lock = GEMINI_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("GEMINI_HOME", tmp.path());
+
+    let written = Gemini
+        .write_session(&simple_session(), &WriteOptions { force: false })
+        .unwrap();
+
+    let content = std::fs::read_to_string(&written.paths[0]).unwrap();
+    let _: serde_json::Value =
+        serde_json::from_str(&content).expect("Gemini output should be valid JSON");
+}
+
+#[test]
+fn writer_gemini_top_level_fields() {
+    let _lock = GEMINI_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("GEMINI_HOME", tmp.path());
+
+    let written = Gemini
+        .write_session(&simple_session(), &WriteOptions { force: false })
+        .unwrap();
+
+    let content = std::fs::read_to_string(&written.paths[0]).unwrap();
+    let root: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+    assert!(
+        root["sessionId"].is_string(),
+        "Gemini should have sessionId"
+    );
+    assert!(
+        root["projectHash"].is_string(),
+        "Gemini should have projectHash"
+    );
+    assert!(
+        root["startTime"].is_string(),
+        "Gemini should have startTime"
+    );
+    assert!(
+        root["lastUpdated"].is_string(),
+        "Gemini should have lastUpdated"
+    );
+    assert!(
+        root["messages"].is_array(),
+        "Gemini should have messages array"
+    );
+    assert_eq!(
+        root["messages"].as_array().unwrap().len(),
+        4,
+        "Gemini should have 4 messages"
+    );
+}
+
+#[test]
+fn writer_gemini_message_types() {
+    let _lock = GEMINI_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("GEMINI_HOME", tmp.path());
+
+    let written = Gemini
+        .write_session(&simple_session(), &WriteOptions { force: false })
+        .unwrap();
+
+    let content = std::fs::read_to_string(&written.paths[0]).unwrap();
+    let root: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let messages = root["messages"].as_array().unwrap();
+
+    assert_eq!(messages[0]["type"], "user", "Gemini msg 0 should be 'user'");
+    assert_eq!(
+        messages[1]["type"], "model",
+        "Gemini msg 1 should be 'model'"
+    );
+    assert_eq!(messages[2]["type"], "user", "Gemini msg 2 should be 'user'");
+    assert_eq!(
+        messages[3]["type"], "model",
+        "Gemini msg 3 should be 'model'"
+    );
+}
+
+#[test]
+fn writer_gemini_timestamps_are_rfc3339() {
+    let _lock = GEMINI_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("GEMINI_HOME", tmp.path());
+
+    let written = Gemini
+        .write_session(&simple_session(), &WriteOptions { force: false })
+        .unwrap();
+
+    let content = std::fs::read_to_string(&written.paths[0]).unwrap();
+    let root: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+    // Top-level timestamps.
+    for field in ["startTime", "lastUpdated"] {
+        let ts = root[field]
+            .as_str()
+            .unwrap_or_else(|| panic!("Gemini: {field} should be string"));
+        chrono::DateTime::parse_from_rfc3339(ts)
+            .unwrap_or_else(|e| panic!("Gemini: {field} '{ts}' not valid RFC3339: {e}"));
+    }
+
+    // Per-message timestamps.
+    for (i, msg) in root["messages"].as_array().unwrap().iter().enumerate() {
+        if let Some(ts) = msg["timestamp"].as_str() {
+            chrono::DateTime::parse_from_rfc3339(ts).unwrap_or_else(|e| {
+                panic!("Gemini msg {i}: timestamp '{ts}' not valid RFC3339: {e}")
+            });
+        }
+    }
+}
+
+#[test]
+fn writer_gemini_hash_directory_structure() {
+    let _lock = GEMINI_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("GEMINI_HOME", tmp.path());
+
+    let written = Gemini
+        .write_session(&simple_session(), &WriteOptions { force: false })
+        .unwrap();
+
+    let path = &written.paths[0];
+    // Should be under <GEMINI_HOME>/tmp/<hash>/chats/session-*.json
+    let parent = path.parent().unwrap();
+    assert_eq!(
+        parent.file_name().unwrap().to_str().unwrap(),
+        "chats",
+        "Gemini file should be in a 'chats' directory"
+    );
+
+    let hash_dir = parent.parent().unwrap();
+    let hash_name = hash_dir.file_name().unwrap().to_str().unwrap();
+    assert_eq!(
+        hash_name.len(),
+        64,
+        "Gemini hash directory should be 64-char hex SHA256, got len={}",
+        hash_name.len()
+    );
+    assert!(
+        hash_name.chars().all(|c| c.is_ascii_hexdigit()),
+        "Gemini hash dir should be hex chars, got '{hash_name}'"
+    );
+
+    assert!(
+        path.extension().is_some_and(|e| e == "json"),
+        "Gemini file should have .json extension"
+    );
+    let filename = path.file_name().unwrap().to_str().unwrap();
+    assert!(
+        filename.starts_with("session-"),
+        "Gemini filename should start with 'session-'"
+    );
+}
+
+#[test]
+fn writer_gemini_extra_fields_preserved() {
+    let _lock = GEMINI_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("GEMINI_HOME", tmp.path());
+
+    let mut session = simple_session();
+    // Simulate grounding metadata on the assistant message.
+    session.messages[1].extra = serde_json::json!({
+        "type": "model",
+        "content": "I'll fix that now.",
+        "groundingMetadata": {"sourceCount": 2},
+        "citations": [{"uri": "doc://ref1"}]
+    });
+
+    let written = Gemini
+        .write_session(&session, &WriteOptions { force: false })
+        .unwrap();
+
+    let content = std::fs::read_to_string(&written.paths[0]).unwrap();
+    let root: serde_json::Value = serde_json::from_str(&content).unwrap();
+    let msg1 = &root["messages"].as_array().unwrap()[1];
+
+    assert!(
+        msg1["groundingMetadata"].is_object(),
+        "Gemini should preserve groundingMetadata from extra"
+    );
+    assert!(
+        msg1["citations"].is_array(),
+        "Gemini should preserve citations from extra"
+    );
+}
+
+#[test]
+fn writer_gemini_project_hash_matches_workspace() {
+    let _lock = GEMINI_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("GEMINI_HOME", tmp.path());
+
+    let written = Gemini
+        .write_session(&simple_session(), &WriteOptions { force: false })
+        .unwrap();
+
+    let content = std::fs::read_to_string(&written.paths[0]).unwrap();
+    let root: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+    let stored_hash = root["projectHash"].as_str().unwrap();
+    let expected_hash =
+        casr::providers::gemini::project_hash(std::path::Path::new("/data/projects/myapp"));
+    assert_eq!(
+        stored_hash, expected_hash,
+        "Gemini projectHash should match SHA256 of workspace"
+    );
+}
+
+// ===========================================================================
+// Cross-provider: default workspace fallback
+// ===========================================================================
+
+#[test]
+fn writer_cc_default_workspace_uses_tmp() {
+    let _lock = CC_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CLAUDE_HOME", tmp.path());
+
+    let mut session = simple_session();
+    session.workspace = None;
+
+    let written = ClaudeCode
+        .write_session(&session, &WriteOptions { force: false })
+        .unwrap();
+
+    let content = std::fs::read_to_string(&written.paths[0]).unwrap();
+    let first: serde_json::Value = serde_json::from_str(content.lines().next().unwrap()).unwrap();
+    assert_eq!(
+        first["cwd"], "/tmp",
+        "CC should fall back to /tmp when workspace is None"
+    );
+}
+
+#[test]
+fn writer_codex_default_workspace_uses_tmp() {
+    let _lock = CODEX_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CODEX_HOME", tmp.path());
+
+    let mut session = simple_session();
+    session.workspace = None;
+
+    let written = Codex
+        .write_session(&session, &WriteOptions { force: false })
+        .unwrap();
+
+    let content = std::fs::read_to_string(&written.paths[0]).unwrap();
+    let first: serde_json::Value = serde_json::from_str(content.lines().next().unwrap()).unwrap();
+    assert_eq!(
+        first["payload"]["cwd"], "/tmp",
+        "Codex should fall back to /tmp when workspace is None"
+    );
+}
