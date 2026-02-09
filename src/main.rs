@@ -5,6 +5,7 @@
 //! CLI entry point: parses arguments, dispatches subcommands, renders output.
 
 use clap::Parser;
+use tracing_subscriber::EnvFilter;
 
 /// Cross Agent Session Resumer — resume AI coding sessions across providers.
 ///
@@ -112,8 +113,28 @@ fn long_version() -> &'static str {
     )
 }
 
+/// Initialize the tracing subscriber based on CLI flags.
+///
+/// Priority: `--trace` > `--verbose` > `RUST_LOG` env var > default (warn).
+fn init_tracing(cli: &Cli) {
+    let filter = if cli.trace {
+        EnvFilter::new("casr=trace")
+    } else if cli.verbose {
+        EnvFilter::new("casr=debug")
+    } else {
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"))
+    };
+
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(true)
+        .with_writer(std::io::stderr)
+        .init();
+}
+
 fn main() {
     let cli = Cli::parse();
+    init_tracing(&cli);
 
     match cli.command {
         Command::Resume { .. } => {

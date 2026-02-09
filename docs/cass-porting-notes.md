@@ -29,6 +29,45 @@ casr copies and adapts relevant CASS source code ("vendoring") rather than depen
 - **Workspace extraction (Gemini):** Same 3-strategy cascade; casr adds writer that reproduces the directory hash.
 - **External ID (Claude Code):** Same filename-based derivation (not `sessionId` field).
 
+## Resume/Storage Reverse-Engineering Notes (2026-02-09)
+
+These findings were validated against real local provider state in `~/.claude`, `~/.codex`, and
+`~/.gemini`, plus connector code in CASS.
+
+### Claude Code
+
+- Projects root: `~/.claude/projects`.
+- Project directory key is a sanitized workspace path:
+  - non-alphanumeric characters -> `-`
+  - case preserved
+  - example: `/data/projects/cross_agent_sessions_resumer` ->
+    `-data-projects-cross-agent-sessions-resumer`.
+- Session file: `<project-key>/<session-id>.jsonl`.
+- `sessionId` in JSONL entries matches the UUID filename used by `claude --resume`.
+
+### Codex
+
+- Sessions root: `~/.codex/sessions/YYYY/MM/DD/`.
+- Filename convention:
+  `rollout-YYYY-MM-DDThh-mm-ss-<session-uuid>.jsonl`.
+- `session_meta.payload.id` matches the UUID suffix in the filename.
+- `codex resume --help` confirms `SESSION_ID` accepts UUIDs (or thread names), with UUID precedence.
+- casr lookup strategy should accept:
+  - explicit relative rollout paths,
+  - UUID filename suffix matches,
+  - `session_meta.payload.id` body matches.
+
+### Gemini CLI
+
+- Sessions root: `~/.gemini/tmp/<projectHash>/chats/session-*.json`.
+- `projectHash` equals `SHA256(<absolute workspace path>)` (lowercase hex).
+- Filename convention:
+  `session-YYYY-MM-DDThh-mm-<sessionId-prefix8>.json`.
+- `gemini --resume` is index/latest-oriented for the current workspace, but files still contain stable
+  full `sessionId` UUIDs used by casr conversion.
+- Assistant messages are emitted as `type: "gemini"` in current real sessions (legacy examples may use
+  `model`), so both must map to canonical assistant role.
+
 ## License
 
 CASS is MIT-licensed. Adapted code retains MIT license compliance per the terms of the original license.

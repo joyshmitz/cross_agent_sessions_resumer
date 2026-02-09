@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  check:
+    name: Check, Lint, Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format check
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Unit tests
+        run: cargo test --lib
+
+      - name: CASS independence guardrail
+        run: |
+          # Fail if Cargo.toml or Cargo.lock references coding_agent_session_search
+          if grep -q 'coding_agent_session_search' Cargo.toml Cargo.lock 2>/dev/null; then
+            echo "::error::Cargo.toml or Cargo.lock references coding_agent_session_search. casr must not depend on CASS at runtime."
+            exit 1
+          fi
+
+  build:
+    name: Release build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release
+        run: cargo build --release
