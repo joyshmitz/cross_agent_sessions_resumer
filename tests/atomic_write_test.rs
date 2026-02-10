@@ -1,8 +1,9 @@
 //! Integration-level atomic write tests for real providers.
 //!
 //! Tests the write pipeline through actual `Provider::write_session()` calls:
-//! force/conflict behavior, backup creation/survival on error, and concurrent
-//! writes. Complements the lower-level unit tests in `pipeline.rs`.
+//! force/conflict behavior, backup creation/survival on error, concurrent
+//! writes, write-then-read roundtrips for multiple providers, and edge cases.
+//! Complements the lower-level unit tests in `pipeline.rs`.
 
 #[cfg(unix)]
 mod atomic_write_integration {
@@ -15,12 +16,22 @@ mod atomic_write_integration {
     use casr::providers::Provider;
     use casr::providers::WriteOptions;
     use casr::providers::claude_code::ClaudeCode;
+    use casr::providers::clawdbot::ClawdBot;
     use casr::providers::codex::Codex;
+    use casr::providers::factory::Factory;
     use casr::providers::gemini::Gemini;
+    use casr::providers::openclaw::OpenClaw;
+    use casr::providers::pi_agent::PiAgent;
+    use casr::providers::vibe::Vibe;
 
     static CC_ENV: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
     static CODEX_ENV: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
     static GEMINI_ENV: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+    static CLAWDBOT_ENV: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+    static VIBE_ENV: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+    static FACTORY_ENV: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+    static OPENCLAW_ENV: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+    static PI_ENV: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     struct EnvGuard {
         key: &'static str,
@@ -92,6 +103,39 @@ mod atomic_write_integration {
         }
     }
 
+    /// Build a session with many messages for stress tests.
+    fn make_large_session(workspace: &str, count: usize) -> CanonicalSession {
+        let messages: Vec<CanonicalMessage> = (0..count)
+            .map(|i| CanonicalMessage {
+                idx: i,
+                role: if i % 2 == 0 {
+                    MessageRole::User
+                } else {
+                    MessageRole::Assistant
+                },
+                content: format!("Message number {i} with some padding content for testing"),
+                timestamp: Some(1_700_000_000_000 + i as i64),
+                author: None,
+                tool_calls: vec![],
+                tool_results: vec![],
+                extra: serde_json::Value::Null,
+            })
+            .collect();
+
+        CanonicalSession {
+            session_id: "large-session-test".to_string(),
+            provider_slug: "test".to_string(),
+            workspace: Some(PathBuf::from(workspace)),
+            title: Some("Large session test".to_string()),
+            started_at: Some(1_700_000_000_000),
+            ended_at: Some(1_700_000_000_000 + count as i64),
+            messages,
+            metadata: serde_json::Value::Null,
+            source_path: PathBuf::from("/tmp/source.jsonl"),
+            model_name: None,
+        }
+    }
+
     // =====================================================================
     // Conflict detection (no --force)
     // =====================================================================
@@ -110,11 +154,8 @@ mod atomic_write_integration {
             .expect("first write should succeed");
         assert!(!written.paths.is_empty());
 
-        // Second write to same session ID should succeed with a new path
-        // (providers generate unique session IDs, so no conflict).
-        // To create an actual conflict, we'd need to write to the same path.
-        // The conflict logic is at the atomic_write level, not provider level.
-        // Providers always generate new UUIDs, so we verify the first write produced a file.
+        // Providers generate unique session IDs, so no conflict on second write.
+        // Verify the first write produced a file.
         assert!(written.paths[0].exists(), "written file should exist");
     }
 
@@ -130,15 +171,12 @@ mod atomic_write_integration {
 
         let session = make_session("/tmp");
 
-        // Write first session.
         let first = Codex
             .write_session(&session, &WriteOptions { force: false })
             .expect("first write");
         let first_path = first.paths[0].clone();
         let first_content = fs::read_to_string(&first_path).expect("read first");
 
-        // Overwrite the same path by writing a different session with same target.
-        // Since Codex generates unique paths, we create the conflict manually.
         let second_session = CanonicalSession {
             title: Some("Second session".to_string()),
             ..session.clone()
@@ -150,8 +188,6 @@ mod atomic_write_integration {
         let conflict_path = sessions_dir.join("rollout-conflict-test.jsonl");
         fs::write(&conflict_path, &first_content).expect("seed conflict file");
 
-        // The force overwrite test works at atomic_write level.
-        // Verify the provider's write produces valid output.
         let written = Codex
             .write_session(&second_session, &WriteOptions { force: false })
             .expect("second write to different path");
@@ -159,7 +195,7 @@ mod atomic_write_integration {
     }
 
     // =====================================================================
-    // Write to read-only directory fails gracefully
+    // Write to read-only directory fails gracefully — core providers
     // =====================================================================
 
     #[test]
@@ -232,7 +268,7 @@ mod atomic_write_integration {
     }
 
     // =====================================================================
-    // Write produces valid, readable output
+    // Write produces valid, readable output — core providers
     // =====================================================================
 
     #[test]
@@ -296,6 +332,108 @@ mod atomic_write_integration {
     }
 
     // =====================================================================
+    // Write-then-read for newer providers (ClawdBot, Vibe, Factory, etc.)
+    // =====================================================================
+
+    #[test]
+    fn clawdbot_write_then_read_preserves_messages() {
+        let _lock = CLAWDBOT_ENV.lock().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _env = EnvGuard::set("CLAWDBOT_HOME", tmp.path());
+
+        let session = make_session("/tmp");
+        let written = ClawdBot
+            .write_session(&session, &WriteOptions { force: false })
+            .expect("ClawdBot write");
+        let readback = ClawdBot
+            .read_session(&written.paths[0])
+            .expect("ClawdBot readback");
+        assert_eq!(
+            readback.messages.len(),
+            session.messages.len(),
+            "ClawdBot: message count should match after write→read"
+        );
+    }
+
+    #[test]
+    fn vibe_write_then_read_preserves_messages() {
+        let _lock = VIBE_ENV.lock().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _env = EnvGuard::set("VIBE_HOME", tmp.path());
+
+        let session = make_session("/tmp");
+        let written = Vibe
+            .write_session(&session, &WriteOptions { force: false })
+            .expect("Vibe write");
+        let readback = Vibe.read_session(&written.paths[0]).expect("Vibe readback");
+        assert_eq!(
+            readback.messages.len(),
+            session.messages.len(),
+            "Vibe: message count should match after write→read"
+        );
+    }
+
+    #[test]
+    fn factory_write_then_read_preserves_messages() {
+        let _lock = FACTORY_ENV.lock().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _env = EnvGuard::set("FACTORY_HOME", tmp.path());
+
+        let session = make_session("/tmp");
+        let written = Factory
+            .write_session(&session, &WriteOptions { force: false })
+            .expect("Factory write");
+        let readback = Factory
+            .read_session(&written.paths[0])
+            .expect("Factory readback");
+        assert_eq!(
+            readback.messages.len(),
+            session.messages.len(),
+            "Factory: message count should match after write→read"
+        );
+    }
+
+    #[test]
+    fn openclaw_write_then_read_preserves_messages() {
+        let _lock = OPENCLAW_ENV.lock().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _env = EnvGuard::set("OPENCLAW_HOME", tmp.path());
+
+        let session = make_session("/tmp");
+        let written = OpenClaw
+            .write_session(&session, &WriteOptions { force: false })
+            .expect("OpenClaw write");
+        let readback = OpenClaw
+            .read_session(&written.paths[0])
+            .expect("OpenClaw readback");
+        assert_eq!(
+            readback.messages.len(),
+            session.messages.len(),
+            "OpenClaw: message count should match after write→read"
+        );
+    }
+
+    #[test]
+    fn pi_agent_write_then_read_preserves_messages() {
+        let _lock = PI_ENV.lock().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _env = EnvGuard::set("PI_AGENT_HOME", tmp.path());
+
+        let session = make_session("/tmp");
+        let written = PiAgent
+            .write_session(&session, &WriteOptions { force: false })
+            .expect("PiAgent write");
+        let readback = PiAgent
+            .read_session(&written.paths[0])
+            .expect("PiAgent readback");
+        assert_eq!(
+            readback.messages.len(),
+            session.messages.len(),
+            "PiAgent: message count should match after write→read"
+        );
+    }
+
+    // =====================================================================
     // Concurrent writes to different sessions don't interfere
     // =====================================================================
 
@@ -318,7 +456,6 @@ mod atomic_write_integration {
             })
             .collect();
 
-        // All paths should be unique.
         let paths: Vec<&PathBuf> = results.iter().map(|r| &r.paths[0]).collect();
         let unique: std::collections::HashSet<&PathBuf> = paths.iter().cloned().collect();
         assert_eq!(
@@ -327,13 +464,40 @@ mod atomic_write_integration {
             "concurrent writes should produce distinct file paths"
         );
 
-        // All files should exist and be readable.
         for (i, r) in results.iter().enumerate() {
             let readback = Codex
                 .read_session(&r.paths[0])
                 .unwrap_or_else(|e| panic!("readback {i} failed: {e}"));
             assert_eq!(readback.messages.len(), 2);
         }
+    }
+
+    #[test]
+    fn concurrent_cc_writes_produce_distinct_files() {
+        let _lock = CC_ENV.lock().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _env = EnvGuard::set("CLAUDE_HOME", tmp.path());
+
+        let results: Vec<_> = (0..5)
+            .map(|i| {
+                let session = CanonicalSession {
+                    session_id: format!("concurrent-cc-{i}"),
+                    title: Some(format!("Concurrent CC session {i}")),
+                    ..make_session("/tmp")
+                };
+                ClaudeCode
+                    .write_session(&session, &WriteOptions { force: false })
+                    .unwrap_or_else(|e| panic!("CC write {i} failed: {e}"))
+            })
+            .collect();
+
+        let paths: Vec<&PathBuf> = results.iter().map(|r| &r.paths[0]).collect();
+        let unique: std::collections::HashSet<&PathBuf> = paths.iter().cloned().collect();
+        assert_eq!(
+            paths.len(),
+            unique.len(),
+            "CC concurrent writes should produce distinct file paths"
+        );
     }
 
     // =====================================================================
@@ -369,8 +533,101 @@ mod atomic_write_integration {
         assert_eq!(readback.messages.len(), 1);
     }
 
+    #[test]
+    fn cc_write_single_message_session() {
+        let _lock = CC_ENV.lock().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _env = EnvGuard::set("CLAUDE_HOME", tmp.path());
+
+        let session = CanonicalSession {
+            messages: vec![CanonicalMessage {
+                idx: 0,
+                role: MessageRole::User,
+                content: "solo CC message".to_string(),
+                timestamp: Some(1_700_000_000_000),
+                author: None,
+                tool_calls: vec![],
+                tool_results: vec![],
+                extra: serde_json::Value::Null,
+            }],
+            ..make_session("/tmp")
+        };
+
+        let written = ClaudeCode
+            .write_session(&session, &WriteOptions { force: false })
+            .expect("CC single-message write");
+        let readback = ClaudeCode
+            .read_session(&written.paths[0])
+            .expect("CC single-message readback");
+        assert_eq!(readback.messages.len(), 1);
+    }
+
     // =====================================================================
-    // Written files are durable (fsync + rename)
+    // Large session stress test
+    // =====================================================================
+
+    #[test]
+    fn codex_write_large_session() {
+        let _lock = CODEX_ENV.lock().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _env = EnvGuard::set("CODEX_HOME", tmp.path());
+
+        let session = make_large_session("/tmp", 200);
+        let written = Codex
+            .write_session(&session, &WriteOptions { force: false })
+            .expect("large session write");
+        let readback = Codex
+            .read_session(&written.paths[0])
+            .expect("large session readback");
+        assert_eq!(
+            readback.messages.len(),
+            200,
+            "Codex: large session should preserve all 200 messages"
+        );
+    }
+
+    #[test]
+    fn cc_write_large_session() {
+        let _lock = CC_ENV.lock().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _env = EnvGuard::set("CLAUDE_HOME", tmp.path());
+
+        let session = make_large_session("/tmp", 200);
+        let written = ClaudeCode
+            .write_session(&session, &WriteOptions { force: false })
+            .expect("CC large session write");
+        let readback = ClaudeCode
+            .read_session(&written.paths[0])
+            .expect("CC large session readback");
+        assert_eq!(
+            readback.messages.len(),
+            200,
+            "CC: large session should preserve all 200 messages"
+        );
+    }
+
+    #[test]
+    fn gemini_write_large_session() {
+        let _lock = GEMINI_ENV.lock().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _env = EnvGuard::set("GEMINI_HOME", tmp.path());
+
+        let session = make_large_session("/tmp", 200);
+        let written = Gemini
+            .write_session(&session, &WriteOptions { force: false })
+            .expect("Gemini large session write");
+        let readback = Gemini
+            .read_session(&written.paths[0])
+            .expect("Gemini large session readback");
+        assert_eq!(
+            readback.messages.len(),
+            200,
+            "Gemini: large session should preserve all 200 messages"
+        );
+    }
+
+    // =====================================================================
+    // Written files are durable (fsync + rename) — no temp artifacts
     // =====================================================================
 
     #[test]
@@ -384,7 +641,6 @@ mod atomic_write_integration {
             .write_session(&session, &WriteOptions { force: false })
             .expect("write");
 
-        // Check parent directory for leftover .casr-tmp-* files.
         let parent = written.paths[0].parent().expect("parent dir");
         let temps: Vec<_> = fs::read_dir(parent)
             .expect("read parent dir")
@@ -395,5 +651,160 @@ mod atomic_write_integration {
             temps.is_empty(),
             "no temp artifacts should remain after write; found: {temps:?}"
         );
+    }
+
+    #[test]
+    fn cc_written_file_has_no_temp_artifacts() {
+        let _lock = CC_ENV.lock().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _env = EnvGuard::set("CLAUDE_HOME", tmp.path());
+
+        let session = make_session("/tmp");
+        let written = ClaudeCode
+            .write_session(&session, &WriteOptions { force: false })
+            .expect("CC write");
+
+        let parent = written.paths[0].parent().expect("parent dir");
+        let temps: Vec<_> = fs::read_dir(parent)
+            .expect("read parent dir")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with(".casr-tmp-"))
+            .collect();
+        assert!(
+            temps.is_empty(),
+            "CC: no temp artifacts should remain; found: {temps:?}"
+        );
+    }
+
+    // =====================================================================
+    // Content preservation across write→read
+    // =====================================================================
+
+    #[test]
+    fn cc_write_preserves_content_and_roles() {
+        let _lock = CC_ENV.lock().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _env = EnvGuard::set("CLAUDE_HOME", tmp.path());
+
+        let session = make_session("/tmp");
+        let written = ClaudeCode
+            .write_session(&session, &WriteOptions { force: false })
+            .expect("CC write");
+        let readback = ClaudeCode
+            .read_session(&written.paths[0])
+            .expect("CC readback");
+
+        assert_eq!(readback.messages.len(), 2);
+        assert_eq!(readback.messages[0].role, MessageRole::User);
+        assert_eq!(readback.messages[1].role, MessageRole::Assistant);
+        assert!(readback.messages[0].content.contains("2+2"));
+        assert!(readback.messages[1].content.contains("4"));
+    }
+
+    #[test]
+    fn codex_write_preserves_content_and_roles() {
+        let _lock = CODEX_ENV.lock().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _env = EnvGuard::set("CODEX_HOME", tmp.path());
+
+        let session = make_session("/tmp");
+        let written = Codex
+            .write_session(&session, &WriteOptions { force: false })
+            .expect("Codex write");
+        let readback = Codex
+            .read_session(&written.paths[0])
+            .expect("Codex readback");
+
+        assert_eq!(readback.messages.len(), 2);
+        assert_eq!(readback.messages[0].role, MessageRole::User);
+        assert_eq!(readback.messages[1].role, MessageRole::Assistant);
+        assert!(readback.messages[0].content.contains("2+2"));
+        assert!(readback.messages[1].content.contains("4"));
+    }
+
+    // =====================================================================
+    // Resume command is populated
+    // =====================================================================
+
+    #[test]
+    fn cc_write_produces_resume_command() {
+        let _lock = CC_ENV.lock().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _env = EnvGuard::set("CLAUDE_HOME", tmp.path());
+
+        let session = make_session("/tmp");
+        let written = ClaudeCode
+            .write_session(&session, &WriteOptions { force: false })
+            .expect("CC write");
+        assert!(
+            written.resume_command.contains("claude"),
+            "CC resume command should mention 'claude'; got: {}",
+            written.resume_command
+        );
+        assert!(
+            !written.session_id.is_empty(),
+            "CC should produce a session ID"
+        );
+    }
+
+    #[test]
+    fn codex_write_produces_resume_command() {
+        let _lock = CODEX_ENV.lock().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _env = EnvGuard::set("CODEX_HOME", tmp.path());
+
+        let session = make_session("/tmp");
+        let written = Codex
+            .write_session(&session, &WriteOptions { force: false })
+            .expect("Codex write");
+        assert!(
+            written.resume_command.contains("codex"),
+            "Codex resume command should mention 'codex'; got: {}",
+            written.resume_command
+        );
+    }
+
+    #[test]
+    fn gemini_write_produces_resume_command() {
+        let _lock = GEMINI_ENV.lock().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _env = EnvGuard::set("GEMINI_HOME", tmp.path());
+
+        let session = make_session("/tmp");
+        let written = Gemini
+            .write_session(&session, &WriteOptions { force: false })
+            .expect("Gemini write");
+        assert!(
+            written.resume_command.contains("gemini"),
+            "Gemini resume command should mention 'gemini'; got: {}",
+            written.resume_command
+        );
+    }
+
+    // =====================================================================
+    // Multiple sequential writes produce unique session IDs
+    // =====================================================================
+
+    #[test]
+    fn sequential_cc_writes_produce_unique_ids() {
+        let _lock = CC_ENV.lock().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _env = EnvGuard::set("CLAUDE_HOME", tmp.path());
+
+        let mut ids = std::collections::HashSet::new();
+        for i in 0..5 {
+            let session = CanonicalSession {
+                session_id: format!("seq-{i}"),
+                ..make_session("/tmp")
+            };
+            let written = ClaudeCode
+                .write_session(&session, &WriteOptions { force: false })
+                .unwrap_or_else(|e| panic!("CC write {i} failed: {e}"));
+            assert!(
+                ids.insert(written.session_id.clone()),
+                "CC: session ID {} was duplicated on write {i}",
+                written.session_id
+            );
+        }
     }
 }

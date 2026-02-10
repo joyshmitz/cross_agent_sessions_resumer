@@ -1210,27 +1210,27 @@ fn pipeline_emits_trace_events_for_detection_read_write_verify() {
         "missing provider detection TRACE event; got {events:#?}"
     );
     assert!(
-        events
-            .iter()
-            .any(|e| e.level == tracing::Level::DEBUG && event_has_message(e, "found Claude Code session")),
+        events.iter().any(|e| e.level == tracing::Level::DEBUG
+            && event_has_message(e, "found Claude Code session")),
         "missing session discovery DEBUG event; got {events:#?}"
     );
     assert!(
-        events
-            .iter()
-            .any(|e| e.level == tracing::Level::DEBUG && event_has_message(e, "Claude Code session parsed")),
+        events.iter().any(|e| e.level == tracing::Level::DEBUG
+            && event_has_message(e, "Claude Code session parsed")),
         "missing source read DEBUG event; got {events:#?}"
     );
     assert!(
         events
             .iter()
-            .any(|e| e.level == tracing::Level::INFO && event_has_message(e, "atomic write complete")),
+            .any(|e| e.level == tracing::Level::INFO
+                && event_has_message(e, "atomic write complete")),
         "missing atomic write INFO event; got {events:#?}"
     );
     assert!(
         events
             .iter()
-            .any(|e| e.level == tracing::Level::DEBUG && event_has_message(e, "Codex session parsed")),
+            .any(|e| e.level == tracing::Level::DEBUG
+                && event_has_message(e, "Codex session parsed")),
         "missing read-back verify DEBUG event; got {events:#?}"
     );
 }

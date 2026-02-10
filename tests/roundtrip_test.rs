@@ -1404,3 +1404,1058 @@ fn roundtrip_piagent_to_codex() {
 
     assert_roundtrip_fidelity(&piagent_session, &readback, "PiAgent→Codex");
 }
+
+// ===========================================================================
+// Codex → all non-CC targets (11 pairs)
+// ===========================================================================
+
+#[test]
+fn roundtrip_codex_to_cursor() {
+    let _lock = CURSOR_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CURSOR_HOME", tmp.path());
+
+    let original = read_codex_fixture("codex_modern", "jsonl");
+    let written = Cursor
+        .write_session(&original, &WriteOptions { force: false })
+        .expect("Cod→Cursor: write should succeed");
+
+    let readback = Cursor
+        .read_session(&written.paths[0])
+        .expect("Cod→Cursor: read-back should succeed");
+
+    assert_roundtrip_fidelity(&original, &readback, "Cod→Cursor");
+    assert_new_session_id(&readback, "Cod→Cursor");
+}
+
+#[test]
+fn roundtrip_codex_to_cline() {
+    let _lock = CLINE_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CLINE_HOME", tmp.path());
+
+    let original = read_codex_fixture("codex_modern", "jsonl");
+    let written = Cline
+        .write_session(&original, &WriteOptions { force: false })
+        .expect("Cod→Cline: write should succeed");
+
+    let readback = Cline
+        .read_session(&written.paths[0])
+        .expect("Cod→Cline: read-back should succeed");
+
+    assert_roundtrip_fidelity(&original, &readback, "Cod→Cline");
+    assert_new_session_id(&readback, "Cod→Cline");
+}
+
+#[test]
+fn roundtrip_codex_to_aider() {
+    let _lock = AIDER_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("AIDER_HOME", tmp.path());
+
+    let original = read_codex_fixture("codex_modern", "jsonl");
+    let written = Aider
+        .write_session(&original, &WriteOptions { force: false })
+        .expect("Cod→Aider: write should succeed");
+
+    let readback = Aider
+        .read_session(&written.paths[0])
+        .expect("Cod→Aider: read-back should succeed");
+
+    assert_roundtrip_fidelity(&original, &readback, "Cod→Aider");
+    assert_new_session_id(&readback, "Cod→Aider");
+}
+
+#[test]
+fn roundtrip_codex_to_amp() {
+    let _lock = AMP_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("AMP_HOME", tmp.path());
+
+    let original = read_codex_fixture("codex_modern", "jsonl");
+    let written = Amp
+        .write_session(&original, &WriteOptions { force: false })
+        .expect("Cod→Amp: write should succeed");
+
+    let readback = Amp
+        .read_session(&written.paths[0])
+        .expect("Cod→Amp: read-back should succeed");
+
+    assert_roundtrip_fidelity(&original, &readback, "Cod→Amp");
+    assert_new_session_id(&readback, "Cod→Amp");
+}
+
+#[test]
+fn roundtrip_codex_to_opencode() {
+    let _lock = OPENCODE_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("OPENCODE_HOME", tmp.path());
+
+    let original = read_codex_fixture("codex_modern", "jsonl");
+    let written = OpenCode
+        .write_session(&original, &WriteOptions { force: false })
+        .expect("Cod→OpenCode: write should succeed");
+
+    let readback = OpenCode
+        .read_session(&written.paths[0])
+        .expect("Cod→OpenCode: read-back should succeed");
+
+    assert_roundtrip_fidelity(&original, &readback, "Cod→OpenCode");
+    assert_new_session_id(&readback, "Cod→OpenCode");
+}
+
+#[test]
+fn roundtrip_codex_to_chatgpt() {
+    let _lock = CHATGPT_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CHATGPT_HOME", tmp.path());
+
+    let original = read_codex_fixture("codex_modern", "jsonl");
+    let written = ChatGpt
+        .write_session(&original, &WriteOptions { force: false })
+        .expect("Cod→ChatGPT: write should succeed");
+
+    let readback = ChatGpt
+        .read_session(&written.paths[0])
+        .expect("Cod→ChatGPT: read-back should succeed");
+
+    assert_roundtrip_fidelity(&original, &readback, "Cod→ChatGPT");
+    assert_new_session_id(&readback, "Cod→ChatGPT");
+}
+
+#[test]
+fn roundtrip_codex_to_clawdbot() {
+    let _lock = CLAWDBOT_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CLAWDBOT_HOME", tmp.path());
+
+    let original = read_codex_fixture("codex_modern", "jsonl");
+    let written = ClawdBot
+        .write_session(&original, &WriteOptions { force: false })
+        .expect("Cod→ClawdBot: write should succeed");
+
+    let readback = ClawdBot
+        .read_session(&written.paths[0])
+        .expect("Cod→ClawdBot: read-back should succeed");
+
+    assert_roundtrip_fidelity(&original, &readback, "Cod→ClawdBot");
+    assert_new_session_id(&readback, "Cod→ClawdBot");
+}
+
+#[test]
+fn roundtrip_codex_to_vibe() {
+    let _lock = VIBE_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("VIBE_HOME", tmp.path());
+
+    let original = read_codex_fixture("codex_modern", "jsonl");
+    let written = Vibe
+        .write_session(&original, &WriteOptions { force: false })
+        .expect("Cod→Vibe: write should succeed");
+
+    let readback = Vibe
+        .read_session(&written.paths[0])
+        .expect("Cod→Vibe: read-back should succeed");
+
+    assert_roundtrip_fidelity(&original, &readback, "Cod→Vibe");
+    assert_new_session_id(&readback, "Cod→Vibe");
+}
+
+#[test]
+fn roundtrip_codex_to_factory() {
+    let _lock = FACTORY_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("FACTORY_HOME", tmp.path());
+
+    let original = read_codex_fixture("codex_modern", "jsonl");
+    let written = Factory
+        .write_session(&original, &WriteOptions { force: false })
+        .expect("Cod→Factory: write should succeed");
+
+    let readback = Factory
+        .read_session(&written.paths[0])
+        .expect("Cod→Factory: read-back should succeed");
+
+    assert_roundtrip_fidelity(&original, &readback, "Cod→Factory");
+    assert_new_session_id(&readback, "Cod→Factory");
+}
+
+#[test]
+fn roundtrip_codex_to_openclaw() {
+    let _lock = OPENCLAW_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("OPENCLAW_HOME", tmp.path());
+
+    let original = read_codex_fixture("codex_modern", "jsonl");
+    let written = OpenClaw
+        .write_session(&original, &WriteOptions { force: false })
+        .expect("Cod→OpenClaw: write should succeed");
+
+    let readback = OpenClaw
+        .read_session(&written.paths[0])
+        .expect("Cod→OpenClaw: read-back should succeed");
+
+    assert_roundtrip_fidelity(&original, &readback, "Cod→OpenClaw");
+    assert_new_session_id(&readback, "Cod→OpenClaw");
+}
+
+#[test]
+fn roundtrip_codex_to_piagent() {
+    let _lock = PIAGENT_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("PI_AGENT_HOME", tmp.path());
+
+    let original = read_codex_fixture("codex_modern", "jsonl");
+    let written = PiAgent
+        .write_session(&original, &WriteOptions { force: false })
+        .expect("Cod→PiAgent: write should succeed");
+
+    let readback = PiAgent
+        .read_session(&written.paths[0])
+        .expect("Cod→PiAgent: read-back should succeed");
+
+    assert_roundtrip_fidelity(&original, &readback, "Cod→PiAgent");
+    assert_new_session_id(&readback, "Cod→PiAgent");
+}
+
+// ===========================================================================
+// Gemini → all non-CC/Codex targets (11 pairs)
+// ===========================================================================
+
+#[test]
+fn roundtrip_gemini_to_cursor() {
+    let _lock = CURSOR_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CURSOR_HOME", tmp.path());
+
+    let original = read_gemini_fixture("gmi_simple");
+    let written = Cursor
+        .write_session(&original, &WriteOptions { force: false })
+        .expect("Gmi→Cursor: write should succeed");
+
+    let readback = Cursor
+        .read_session(&written.paths[0])
+        .expect("Gmi→Cursor: read-back should succeed");
+
+    assert_roundtrip_fidelity(&original, &readback, "Gmi→Cursor");
+    assert_new_session_id(&readback, "Gmi→Cursor");
+}
+
+#[test]
+fn roundtrip_gemini_to_cline() {
+    let _lock = CLINE_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CLINE_HOME", tmp.path());
+
+    let original = read_gemini_fixture("gmi_simple");
+    let written = Cline
+        .write_session(&original, &WriteOptions { force: false })
+        .expect("Gmi→Cline: write should succeed");
+
+    let readback = Cline
+        .read_session(&written.paths[0])
+        .expect("Gmi→Cline: read-back should succeed");
+
+    assert_roundtrip_fidelity(&original, &readback, "Gmi→Cline");
+    assert_new_session_id(&readback, "Gmi→Cline");
+}
+
+#[test]
+fn roundtrip_gemini_to_aider() {
+    let _lock = AIDER_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("AIDER_HOME", tmp.path());
+
+    let original = read_gemini_fixture("gmi_simple");
+    let written = Aider
+        .write_session(&original, &WriteOptions { force: false })
+        .expect("Gmi→Aider: write should succeed");
+
+    let readback = Aider
+        .read_session(&written.paths[0])
+        .expect("Gmi→Aider: read-back should succeed");
+
+    assert_roundtrip_fidelity(&original, &readback, "Gmi→Aider");
+    assert_new_session_id(&readback, "Gmi→Aider");
+}
+
+#[test]
+fn roundtrip_gemini_to_amp() {
+    let _lock = AMP_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("AMP_HOME", tmp.path());
+
+    let original = read_gemini_fixture("gmi_simple");
+    let written = Amp
+        .write_session(&original, &WriteOptions { force: false })
+        .expect("Gmi→Amp: write should succeed");
+
+    let readback = Amp
+        .read_session(&written.paths[0])
+        .expect("Gmi→Amp: read-back should succeed");
+
+    assert_roundtrip_fidelity(&original, &readback, "Gmi→Amp");
+    assert_new_session_id(&readback, "Gmi→Amp");
+}
+
+#[test]
+fn roundtrip_gemini_to_opencode() {
+    let _lock = OPENCODE_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("OPENCODE_HOME", tmp.path());
+
+    let original = read_gemini_fixture("gmi_simple");
+    let written = OpenCode
+        .write_session(&original, &WriteOptions { force: false })
+        .expect("Gmi→OpenCode: write should succeed");
+
+    let readback = OpenCode
+        .read_session(&written.paths[0])
+        .expect("Gmi→OpenCode: read-back should succeed");
+
+    assert_roundtrip_fidelity(&original, &readback, "Gmi→OpenCode");
+    assert_new_session_id(&readback, "Gmi→OpenCode");
+}
+
+#[test]
+fn roundtrip_gemini_to_chatgpt() {
+    let _lock = CHATGPT_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CHATGPT_HOME", tmp.path());
+
+    let original = read_gemini_fixture("gmi_simple");
+    let written = ChatGpt
+        .write_session(&original, &WriteOptions { force: false })
+        .expect("Gmi→ChatGPT: write should succeed");
+
+    let readback = ChatGpt
+        .read_session(&written.paths[0])
+        .expect("Gmi→ChatGPT: read-back should succeed");
+
+    assert_roundtrip_fidelity(&original, &readback, "Gmi→ChatGPT");
+    assert_new_session_id(&readback, "Gmi→ChatGPT");
+}
+
+#[test]
+fn roundtrip_gemini_to_clawdbot() {
+    let _lock = CLAWDBOT_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("CLAWDBOT_HOME", tmp.path());
+
+    let original = read_gemini_fixture("gmi_simple");
+    let written = ClawdBot
+        .write_session(&original, &WriteOptions { force: false })
+        .expect("Gmi→ClawdBot: write should succeed");
+
+    let readback = ClawdBot
+        .read_session(&written.paths[0])
+        .expect("Gmi→ClawdBot: read-back should succeed");
+
+    assert_roundtrip_fidelity(&original, &readback, "Gmi→ClawdBot");
+    assert_new_session_id(&readback, "Gmi→ClawdBot");
+}
+
+#[test]
+fn roundtrip_gemini_to_vibe() {
+    let _lock = VIBE_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("VIBE_HOME", tmp.path());
+
+    let original = read_gemini_fixture("gmi_simple");
+    let written = Vibe
+        .write_session(&original, &WriteOptions { force: false })
+        .expect("Gmi→Vibe: write should succeed");
+
+    let readback = Vibe
+        .read_session(&written.paths[0])
+        .expect("Gmi→Vibe: read-back should succeed");
+
+    assert_roundtrip_fidelity(&original, &readback, "Gmi→Vibe");
+    assert_new_session_id(&readback, "Gmi→Vibe");
+}
+
+#[test]
+fn roundtrip_gemini_to_factory() {
+    let _lock = FACTORY_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("FACTORY_HOME", tmp.path());
+
+    let original = read_gemini_fixture("gmi_simple");
+    let written = Factory
+        .write_session(&original, &WriteOptions { force: false })
+        .expect("Gmi→Factory: write should succeed");
+
+    let readback = Factory
+        .read_session(&written.paths[0])
+        .expect("Gmi→Factory: read-back should succeed");
+
+    assert_roundtrip_fidelity(&original, &readback, "Gmi→Factory");
+    assert_new_session_id(&readback, "Gmi→Factory");
+}
+
+#[test]
+fn roundtrip_gemini_to_openclaw() {
+    let _lock = OPENCLAW_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("OPENCLAW_HOME", tmp.path());
+
+    let original = read_gemini_fixture("gmi_simple");
+    let written = OpenClaw
+        .write_session(&original, &WriteOptions { force: false })
+        .expect("Gmi→OpenClaw: write should succeed");
+
+    let readback = OpenClaw
+        .read_session(&written.paths[0])
+        .expect("Gmi→OpenClaw: read-back should succeed");
+
+    assert_roundtrip_fidelity(&original, &readback, "Gmi→OpenClaw");
+    assert_new_session_id(&readback, "Gmi→OpenClaw");
+}
+
+#[test]
+fn roundtrip_gemini_to_piagent() {
+    let _lock = PIAGENT_ENV.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set("PI_AGENT_HOME", tmp.path());
+
+    let original = read_gemini_fixture("gmi_simple");
+    let written = PiAgent
+        .write_session(&original, &WriteOptions { force: false })
+        .expect("Gmi→PiAgent: write should succeed");
+
+    let readback = PiAgent
+        .read_session(&written.paths[0])
+        .expect("Gmi→PiAgent: read-back should succeed");
+
+    assert_roundtrip_fidelity(&original, &readback, "Gmi→PiAgent");
+    assert_new_session_id(&readback, "Gmi→PiAgent");
+}
+
+// ===========================================================================
+// Cross-provider pairs (representative selection among non-CC/Codex/Gemini)
+// ===========================================================================
+
+/// Helper: create a canonical session via CC→Source→read-back, then test Source→Target roundtrip.
+fn cross_provider_roundtrip(
+    source: &dyn Provider,
+    source_env_key: &'static str,
+    source_lock: &Mutex<()>,
+    target: &dyn Provider,
+    target_env_key: &'static str,
+    target_lock: &Mutex<()>,
+    label: &str,
+) {
+    // Step 1: Create source session (seed from CC fixture → write to source → read back).
+    let source_session = {
+        let _lock = source_lock.lock().unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _env = EnvGuard::set(source_env_key, tmp.path());
+
+        let seed = read_cc_fixture("cc_simple");
+        let written = source
+            .write_session(&seed, &WriteOptions { force: false })
+            .unwrap_or_else(|e| panic!("[{label}] seed write failed: {e}"));
+        source
+            .read_session(&written.paths[0])
+            .unwrap_or_else(|e| panic!("[{label}] seed read-back failed: {e}"))
+    };
+
+    // Step 2: Write source session to target, read back, compare.
+    let _lock = target_lock.lock().unwrap();
+    let tmp = tempfile::TempDir::new().unwrap();
+    let _env = EnvGuard::set(target_env_key, tmp.path());
+
+    let written = target
+        .write_session(&source_session, &WriteOptions { force: false })
+        .unwrap_or_else(|e| panic!("[{label}] target write failed: {e}"));
+    let readback = target
+        .read_session(&written.paths[0])
+        .unwrap_or_else(|e| panic!("[{label}] target read-back failed: {e}"));
+
+    assert_roundtrip_fidelity(&source_session, &readback, label);
+    assert_new_session_id(&readback, label);
+}
+
+#[test]
+fn roundtrip_cursor_to_cline() {
+    cross_provider_roundtrip(
+        &Cursor,
+        "CURSOR_HOME",
+        &CURSOR_ENV,
+        &Cline,
+        "CLINE_HOME",
+        &CLINE_ENV,
+        "Cursor→Cline",
+    );
+}
+
+#[test]
+fn roundtrip_cline_to_aider() {
+    cross_provider_roundtrip(
+        &Cline,
+        "CLINE_HOME",
+        &CLINE_ENV,
+        &Aider,
+        "AIDER_HOME",
+        &AIDER_ENV,
+        "Cline→Aider",
+    );
+}
+
+#[test]
+fn roundtrip_aider_to_amp() {
+    cross_provider_roundtrip(
+        &Aider,
+        "AIDER_HOME",
+        &AIDER_ENV,
+        &Amp,
+        "AMP_HOME",
+        &AMP_ENV,
+        "Aider→Amp",
+    );
+}
+
+#[test]
+fn roundtrip_amp_to_opencode() {
+    cross_provider_roundtrip(
+        &Amp,
+        "AMP_HOME",
+        &AMP_ENV,
+        &OpenCode,
+        "OPENCODE_HOME",
+        &OPENCODE_ENV,
+        "Amp→OpenCode",
+    );
+}
+
+#[test]
+fn roundtrip_opencode_to_chatgpt() {
+    cross_provider_roundtrip(
+        &OpenCode,
+        "OPENCODE_HOME",
+        &OPENCODE_ENV,
+        &ChatGpt,
+        "CHATGPT_HOME",
+        &CHATGPT_ENV,
+        "OpenCode→ChatGPT",
+    );
+}
+
+#[test]
+fn roundtrip_chatgpt_to_clawdbot() {
+    cross_provider_roundtrip(
+        &ChatGpt,
+        "CHATGPT_HOME",
+        &CHATGPT_ENV,
+        &ClawdBot,
+        "CLAWDBOT_HOME",
+        &CLAWDBOT_ENV,
+        "ChatGPT→ClawdBot",
+    );
+}
+
+#[test]
+fn roundtrip_clawdbot_to_vibe() {
+    cross_provider_roundtrip(
+        &ClawdBot,
+        "CLAWDBOT_HOME",
+        &CLAWDBOT_ENV,
+        &Vibe,
+        "VIBE_HOME",
+        &VIBE_ENV,
+        "ClawdBot→Vibe",
+    );
+}
+
+#[test]
+fn roundtrip_vibe_to_factory() {
+    cross_provider_roundtrip(
+        &Vibe,
+        "VIBE_HOME",
+        &VIBE_ENV,
+        &Factory,
+        "FACTORY_HOME",
+        &FACTORY_ENV,
+        "Vibe→Factory",
+    );
+}
+
+#[test]
+fn roundtrip_factory_to_openclaw() {
+    cross_provider_roundtrip(
+        &Factory,
+        "FACTORY_HOME",
+        &FACTORY_ENV,
+        &OpenClaw,
+        "OPENCLAW_HOME",
+        &OPENCLAW_ENV,
+        "Factory→OpenClaw",
+    );
+}
+
+#[test]
+fn roundtrip_openclaw_to_piagent() {
+    cross_provider_roundtrip(
+        &OpenClaw,
+        "OPENCLAW_HOME",
+        &OPENCLAW_ENV,
+        &PiAgent,
+        "PI_AGENT_HOME",
+        &PIAGENT_ENV,
+        "OpenClaw→PiAgent",
+    );
+}
+
+#[test]
+fn roundtrip_piagent_to_cursor() {
+    cross_provider_roundtrip(
+        &PiAgent,
+        "PI_AGENT_HOME",
+        &PIAGENT_ENV,
+        &Cursor,
+        "CURSOR_HOME",
+        &CURSOR_ENV,
+        "PiAgent→Cursor",
+    );
+}
+
+// ===========================================================================
+// Additional cross-provider pairs (diagonal coverage)
+// ===========================================================================
+
+#[test]
+fn roundtrip_cursor_to_chatgpt() {
+    cross_provider_roundtrip(
+        &Cursor,
+        "CURSOR_HOME",
+        &CURSOR_ENV,
+        &ChatGpt,
+        "CHATGPT_HOME",
+        &CHATGPT_ENV,
+        "Cursor→ChatGPT",
+    );
+}
+
+#[test]
+fn roundtrip_aider_to_factory() {
+    cross_provider_roundtrip(
+        &Aider,
+        "AIDER_HOME",
+        &AIDER_ENV,
+        &Factory,
+        "FACTORY_HOME",
+        &FACTORY_ENV,
+        "Aider→Factory",
+    );
+}
+
+#[test]
+fn roundtrip_amp_to_vibe() {
+    cross_provider_roundtrip(
+        &Amp,
+        "AMP_HOME",
+        &AMP_ENV,
+        &Vibe,
+        "VIBE_HOME",
+        &VIBE_ENV,
+        "Amp→Vibe",
+    );
+}
+
+#[test]
+fn roundtrip_opencode_to_openclaw() {
+    cross_provider_roundtrip(
+        &OpenCode,
+        "OPENCODE_HOME",
+        &OPENCODE_ENV,
+        &OpenClaw,
+        "OPENCLAW_HOME",
+        &OPENCLAW_ENV,
+        "OpenCode→OpenClaw",
+    );
+}
+
+#[test]
+fn roundtrip_chatgpt_to_piagent() {
+    cross_provider_roundtrip(
+        &ChatGpt,
+        "CHATGPT_HOME",
+        &CHATGPT_ENV,
+        &PiAgent,
+        "PI_AGENT_HOME",
+        &PIAGENT_ENV,
+        "ChatGPT→PiAgent",
+    );
+}
+
+#[test]
+fn roundtrip_clawdbot_to_cline() {
+    cross_provider_roundtrip(
+        &ClawdBot,
+        "CLAWDBOT_HOME",
+        &CLAWDBOT_ENV,
+        &Cline,
+        "CLINE_HOME",
+        &CLINE_ENV,
+        "ClawdBot→Cline",
+    );
+}
+
+#[test]
+fn roundtrip_vibe_to_aider() {
+    cross_provider_roundtrip(
+        &Vibe,
+        "VIBE_HOME",
+        &VIBE_ENV,
+        &Aider,
+        "AIDER_HOME",
+        &AIDER_ENV,
+        "Vibe→Aider",
+    );
+}
+
+#[test]
+fn roundtrip_factory_to_amp() {
+    cross_provider_roundtrip(
+        &Factory,
+        "FACTORY_HOME",
+        &FACTORY_ENV,
+        &Amp,
+        "AMP_HOME",
+        &AMP_ENV,
+        "Factory→Amp",
+    );
+}
+
+#[test]
+fn roundtrip_openclaw_to_opencode() {
+    cross_provider_roundtrip(
+        &OpenClaw,
+        "OPENCLAW_HOME",
+        &OPENCLAW_ENV,
+        &OpenCode,
+        "OPENCODE_HOME",
+        &OPENCODE_ENV,
+        "OpenClaw→OpenCode",
+    );
+}
+
+#[test]
+fn roundtrip_piagent_to_clawdbot() {
+    cross_provider_roundtrip(
+        &PiAgent,
+        "PI_AGENT_HOME",
+        &PIAGENT_ENV,
+        &ClawdBot,
+        "CLAWDBOT_HOME",
+        &CLAWDBOT_ENV,
+        "PiAgent→ClawdBot",
+    );
+}
+
+// ===========================================================================
+// Newer-6 full pairwise matrix (bd-1bh.39)
+// ChatGPT, ClawdBot, Vibe, Factory, OpenClaw, PiAgent — all 30 directed pairs.
+// Tests above already cover 7: ChatGPT→ClawdBot, ChatGPT→PiAgent,
+// ClawdBot→Vibe, Vibe→Factory, Factory→OpenClaw, OpenClaw→PiAgent,
+// PiAgent→ClawdBot. Remaining 23 pairs below.
+// ===========================================================================
+
+#[test]
+fn roundtrip_chatgpt_to_vibe() {
+    cross_provider_roundtrip(
+        &ChatGpt,
+        "CHATGPT_HOME",
+        &CHATGPT_ENV,
+        &Vibe,
+        "VIBE_HOME",
+        &VIBE_ENV,
+        "ChatGPT→Vibe",
+    );
+}
+
+#[test]
+fn roundtrip_chatgpt_to_factory() {
+    cross_provider_roundtrip(
+        &ChatGpt,
+        "CHATGPT_HOME",
+        &CHATGPT_ENV,
+        &Factory,
+        "FACTORY_HOME",
+        &FACTORY_ENV,
+        "ChatGPT→Factory",
+    );
+}
+
+#[test]
+fn roundtrip_chatgpt_to_openclaw() {
+    cross_provider_roundtrip(
+        &ChatGpt,
+        "CHATGPT_HOME",
+        &CHATGPT_ENV,
+        &OpenClaw,
+        "OPENCLAW_HOME",
+        &OPENCLAW_ENV,
+        "ChatGPT→OpenClaw",
+    );
+}
+
+#[test]
+fn roundtrip_clawdbot_to_chatgpt() {
+    cross_provider_roundtrip(
+        &ClawdBot,
+        "CLAWDBOT_HOME",
+        &CLAWDBOT_ENV,
+        &ChatGpt,
+        "CHATGPT_HOME",
+        &CHATGPT_ENV,
+        "ClawdBot→ChatGPT",
+    );
+}
+
+#[test]
+fn roundtrip_clawdbot_to_factory() {
+    cross_provider_roundtrip(
+        &ClawdBot,
+        "CLAWDBOT_HOME",
+        &CLAWDBOT_ENV,
+        &Factory,
+        "FACTORY_HOME",
+        &FACTORY_ENV,
+        "ClawdBot→Factory",
+    );
+}
+
+#[test]
+fn roundtrip_clawdbot_to_openclaw() {
+    cross_provider_roundtrip(
+        &ClawdBot,
+        "CLAWDBOT_HOME",
+        &CLAWDBOT_ENV,
+        &OpenClaw,
+        "OPENCLAW_HOME",
+        &OPENCLAW_ENV,
+        "ClawdBot→OpenClaw",
+    );
+}
+
+#[test]
+fn roundtrip_clawdbot_to_piagent() {
+    cross_provider_roundtrip(
+        &ClawdBot,
+        "CLAWDBOT_HOME",
+        &CLAWDBOT_ENV,
+        &PiAgent,
+        "PI_AGENT_HOME",
+        &PIAGENT_ENV,
+        "ClawdBot→PiAgent",
+    );
+}
+
+#[test]
+fn roundtrip_vibe_to_chatgpt() {
+    cross_provider_roundtrip(
+        &Vibe,
+        "VIBE_HOME",
+        &VIBE_ENV,
+        &ChatGpt,
+        "CHATGPT_HOME",
+        &CHATGPT_ENV,
+        "Vibe→ChatGPT",
+    );
+}
+
+#[test]
+fn roundtrip_vibe_to_clawdbot() {
+    cross_provider_roundtrip(
+        &Vibe,
+        "VIBE_HOME",
+        &VIBE_ENV,
+        &ClawdBot,
+        "CLAWDBOT_HOME",
+        &CLAWDBOT_ENV,
+        "Vibe→ClawdBot",
+    );
+}
+
+#[test]
+fn roundtrip_vibe_to_openclaw() {
+    cross_provider_roundtrip(
+        &Vibe,
+        "VIBE_HOME",
+        &VIBE_ENV,
+        &OpenClaw,
+        "OPENCLAW_HOME",
+        &OPENCLAW_ENV,
+        "Vibe→OpenClaw",
+    );
+}
+
+#[test]
+fn roundtrip_vibe_to_piagent() {
+    cross_provider_roundtrip(
+        &Vibe,
+        "VIBE_HOME",
+        &VIBE_ENV,
+        &PiAgent,
+        "PI_AGENT_HOME",
+        &PIAGENT_ENV,
+        "Vibe→PiAgent",
+    );
+}
+
+#[test]
+fn roundtrip_factory_to_chatgpt() {
+    cross_provider_roundtrip(
+        &Factory,
+        "FACTORY_HOME",
+        &FACTORY_ENV,
+        &ChatGpt,
+        "CHATGPT_HOME",
+        &CHATGPT_ENV,
+        "Factory→ChatGPT",
+    );
+}
+
+#[test]
+fn roundtrip_factory_to_clawdbot() {
+    cross_provider_roundtrip(
+        &Factory,
+        "FACTORY_HOME",
+        &FACTORY_ENV,
+        &ClawdBot,
+        "CLAWDBOT_HOME",
+        &CLAWDBOT_ENV,
+        "Factory→ClawdBot",
+    );
+}
+
+#[test]
+fn roundtrip_factory_to_vibe() {
+    cross_provider_roundtrip(
+        &Factory,
+        "FACTORY_HOME",
+        &FACTORY_ENV,
+        &Vibe,
+        "VIBE_HOME",
+        &VIBE_ENV,
+        "Factory→Vibe",
+    );
+}
+
+#[test]
+fn roundtrip_factory_to_piagent() {
+    cross_provider_roundtrip(
+        &Factory,
+        "FACTORY_HOME",
+        &FACTORY_ENV,
+        &PiAgent,
+        "PI_AGENT_HOME",
+        &PIAGENT_ENV,
+        "Factory→PiAgent",
+    );
+}
+
+#[test]
+fn roundtrip_openclaw_to_chatgpt() {
+    cross_provider_roundtrip(
+        &OpenClaw,
+        "OPENCLAW_HOME",
+        &OPENCLAW_ENV,
+        &ChatGpt,
+        "CHATGPT_HOME",
+        &CHATGPT_ENV,
+        "OpenClaw→ChatGPT",
+    );
+}
+
+#[test]
+fn roundtrip_openclaw_to_clawdbot() {
+    cross_provider_roundtrip(
+        &OpenClaw,
+        "OPENCLAW_HOME",
+        &OPENCLAW_ENV,
+        &ClawdBot,
+        "CLAWDBOT_HOME",
+        &CLAWDBOT_ENV,
+        "OpenClaw→ClawdBot",
+    );
+}
+
+#[test]
+fn roundtrip_openclaw_to_vibe() {
+    cross_provider_roundtrip(
+        &OpenClaw,
+        "OPENCLAW_HOME",
+        &OPENCLAW_ENV,
+        &Vibe,
+        "VIBE_HOME",
+        &VIBE_ENV,
+        "OpenClaw→Vibe",
+    );
+}
+
+#[test]
+fn roundtrip_openclaw_to_factory() {
+    cross_provider_roundtrip(
+        &OpenClaw,
+        "OPENCLAW_HOME",
+        &OPENCLAW_ENV,
+        &Factory,
+        "FACTORY_HOME",
+        &FACTORY_ENV,
+        "OpenClaw→Factory",
+    );
+}
+
+#[test]
+fn roundtrip_piagent_to_chatgpt() {
+    cross_provider_roundtrip(
+        &PiAgent,
+        "PI_AGENT_HOME",
+        &PIAGENT_ENV,
+        &ChatGpt,
+        "CHATGPT_HOME",
+        &CHATGPT_ENV,
+        "PiAgent→ChatGPT",
+    );
+}
+
+#[test]
+fn roundtrip_piagent_to_vibe() {
+    cross_provider_roundtrip(
+        &PiAgent,
+        "PI_AGENT_HOME",
+        &PIAGENT_ENV,
+        &Vibe,
+        "VIBE_HOME",
+        &VIBE_ENV,
+        "PiAgent→Vibe",
+    );
+}
+
+#[test]
+fn roundtrip_piagent_to_factory() {
+    cross_provider_roundtrip(
+        &PiAgent,
+        "PI_AGENT_HOME",
+        &PIAGENT_ENV,
+        &Factory,
+        "FACTORY_HOME",
+        &FACTORY_ENV,
+        "PiAgent→Factory",
+    );
+}
+
+#[test]
+fn roundtrip_piagent_to_openclaw() {
+    cross_provider_roundtrip(
+        &PiAgent,
+        "PI_AGENT_HOME",
+        &PIAGENT_ENV,
+        &OpenClaw,
+        "OPENCLAW_HOME",
+        &OPENCLAW_ENV,
+        "PiAgent→OpenClaw",
+    );
+}
