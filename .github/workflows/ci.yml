@@ -212,6 +212,106 @@ jobs:
         env:
           NO_COLOR: "1"
 
+  perf-regression:
+    name: Perf Regression Gates
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Scalability regression test
+        run: cargo test --test scalability_test -- --nocapture --test-threads=1
+        env:
+          NO_COLOR: "1"
+          CASR_PERF_METRICS_FILE: perf-metrics.json
+
+      - name: Validate perf metrics artifact
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          def main() -> int:
+              path = os.environ.get("CASR_PERF_METRICS_FILE", "perf-metrics.json")
+              if not os.path.exists(path):
+                  print(f"::error::{path} not found (scalability_test did not write metrics)")
+                  return 1
+
+              with open(path, "r", encoding="utf-8") as f:
+                  metrics = json.load(f)
+
+              ok = True
+
+              suite = metrics.get("suite")
+              if suite != "scalability_regression":
+                  print(f"::error::unexpected suite={suite!r}")
+                  ok = False
+
+              discovery = metrics.get("discovery") or {}
+
+              def check_leq(name: str, value, budget) -> None:
+                  nonlocal ok
+                  if value is None or budget is None:
+                      print(f"::error::missing {name} value/budget")
+                      ok = False
+                      return
+                  if value > budget:
+                      print(f"::error::{name} exceeded: {value}ms > {budget}ms")
+                      ok = False
+                  print(f"{name}: {value}ms (budget {budget}ms)")
+
+              check_leq(
+                  "discovery(found)",
+                  discovery.get("found_elapsed_ms"),
+                  discovery.get("found_budget_ms"),
+              )
+              check_leq(
+                  "discovery(miss)",
+                  discovery.get("miss_elapsed_ms"),
+                  discovery.get("miss_budget_ms"),
+              )
+
+              min_tp = metrics.get("min_reader_throughput_msg_per_sec")
+              if min_tp is None:
+                  print("::error::missing min_reader_throughput_msg_per_sec")
+                  ok = False
+                  min_tp = 0.0
+
+              readers = metrics.get("readers")
+              if not isinstance(readers, list) or not readers:
+                  print("::error::missing readers metrics")
+                  ok = False
+              else:
+                  for r in readers:
+                      provider = r.get("provider", "<unknown>")
+                      tp = r.get("throughput_msg_per_sec")
+                      if tp is None:
+                          print(f"::error::{provider} missing throughput_msg_per_sec")
+                          ok = False
+                          continue
+                      if tp < min_tp:
+                          print(
+                              f"::error::{provider} throughput too low: {tp:.2f} < {min_tp:.2f} msg/s"
+                          )
+                          ok = False
+                      print(f"{provider}: {tp:.2f} msg/s (min {min_tp:.2f})")
+
+              return 0 if ok else 1
+
+          sys.exit(main())
+          PY
+
+      - name: Upload perf metrics artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: casr-perf-metrics
+          path: perf-metrics.json
+
   e2e:
     name: End-to-End Shell Tests
     runs-on: ubuntu-latest

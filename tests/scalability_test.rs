@@ -403,6 +403,7 @@ fn discovery_and_reader_scalability_regression() {
         "suite": "scalability_regression",
         "files_per_provider": FILES_PER_PROVIDER,
         "large_message_count": LARGE_MESSAGE_COUNT,
+        "min_reader_throughput_msg_per_sec": MIN_READER_THROUGHPUT_MSG_PER_SEC,
         "discovery": {
             "found_elapsed_ms": found_ms,
             "found_budget_ms": DISCOVERY_FOUND_BUDGET_MS,
