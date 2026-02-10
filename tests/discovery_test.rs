@@ -372,6 +372,50 @@ fn source_path_hint_bypasses_discovery_and_uses_owning_provider() {
 }
 
 #[test]
+fn source_path_hint_accepts_virtual_child_of_file() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let db_path = tmp.path().join("state.vscdb");
+    std::fs::write(&db_path, "x").expect("seed db file");
+
+    // Simulate providers that address specific sessions via `<file>/<id>` virtual paths.
+    let virtual_path = db_path.join("session-123");
+
+    let cur = MockProvider::new("Cursor", "cursor", "cur", true, vec![db_path.clone()]);
+    let registry = ProviderRegistry::new(vec![Box::new(cur)]);
+
+    let hint = SourceHint::Path(virtual_path.clone());
+    let resolved = registry
+        .resolve_session("ignored-by-path-hint", Some(&hint))
+        .expect("virtual path hint should resolve");
+
+    assert_eq!(resolved.provider.slug(), "cursor");
+    assert_eq!(resolved.path, virtual_path);
+}
+
+#[test]
+fn source_path_hint_non_file_non_virtual_errors() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let dir_path = tmp.path().join("not-a-file");
+    std::fs::create_dir_all(&dir_path).expect("create dir");
+
+    let cc = MockProvider::new(
+        "Claude Code",
+        "claude-code",
+        "cc",
+        true,
+        vec![tmp.path().to_path_buf()],
+    );
+    let registry = ProviderRegistry::new(vec![Box::new(cc)]);
+
+    let hint = SourceHint::Path(dir_path);
+    let err = registry
+        .resolve_session("ignored-by-path-hint", Some(&hint))
+        .expect_err("dir path hint should error");
+
+    assert!(matches!(err, CasrError::SessionNotFound { .. }));
+}
+
+#[test]
 fn source_path_hint_without_root_match_selects_best_effort_provider() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let orphan_path = tmp.path().join("orphan.json");

@@ -668,6 +668,59 @@ fn pipeline_readback_mismatch_fails_and_removes_unverified_output() {
 }
 
 #[test]
+fn pipeline_readback_content_mismatch_fails_and_removes_unverified_output() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src_root = tmp.path().join("src");
+    let dst_root = tmp.path().join("dst");
+    fs::create_dir_all(&src_root).expect("create src root");
+    fs::create_dir_all(&dst_root).expect("create dst root");
+
+    let src = MockProvider::new("Source", "src", "src", vec![src_root.clone()]);
+    let dst = MockProvider::new("Target", "dst", "tgt", vec![dst_root.clone()]);
+
+    let source_path = src_root.join("session-readback-content-mismatch.json");
+    let written_path = dst_root.join("out-content-mismatch.json");
+    src.set_owned_session("sid-readback-content-mismatch", source_path.clone());
+    src.set_read_session(
+        source_path,
+        valid_session_with_id("sid-readback-content-mismatch"),
+    );
+    dst.set_write_success(WrittenSession {
+        paths: vec![written_path.clone()],
+        session_id: "target-content-mismatch".to_string(),
+        resume_command: "tgt --resume target-content-mismatch".to_string(),
+        backup_path: None,
+    });
+
+    fs::write(&written_path, "unverified-output").expect("seed unverified output");
+
+    let mut readback = valid_session_with_id("sid-readback-content-mismatch");
+    readback.messages[1].content = "corrupted".to_string();
+    dst.set_read_session(written_path.clone(), readback);
+
+    let pipeline = ConversionPipeline {
+        registry: ProviderRegistry::new(vec![Box::new(src), Box::new(dst)]),
+    };
+    let err = pipeline
+        .convert("tgt", "sid-readback-content-mismatch", options(false, None))
+        .expect_err("readback content mismatch should fail conversion");
+
+    match err.downcast_ref::<CasrError>() {
+        Some(CasrError::VerifyFailed { detail, .. }) => {
+            assert!(
+                detail.contains("content mismatch"),
+                "unexpected verify detail: {detail}"
+            );
+        }
+        other => panic!("expected VerifyFailed, got {other:?}"),
+    }
+    assert!(
+        !written_path.exists(),
+        "unverified output should be removed on verify failure"
+    );
+}
+
+#[test]
 fn pipeline_readback_error_restores_backup_and_returns_verify_failed() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let src_root = tmp.path().join("src");

@@ -428,12 +428,7 @@ but resume may fail until the CLI is installed.",
                         original_messages = canonical.messages.len(),
                         "read-back verification"
                     );
-                    if readback.messages.len() != canonical.messages.len() {
-                        let detail = format!(
-                            "message count mismatch: wrote {} messages, read back {}",
-                            canonical.messages.len(),
-                            readback.messages.len()
-                        );
+                    if let Some(detail) = readback_mismatch_detail(&canonical, &readback) {
                         warn!(detail, "read-back verification failed");
                         let rollback_detail =
                             match rollback_written_session(target_provider.slug(), &written) {
@@ -477,6 +472,42 @@ but resume may fail until the CLI is installed.",
             warnings: all_warnings,
         })
     }
+}
+
+fn readback_mismatch_detail(
+    canonical: &CanonicalSession,
+    readback: &CanonicalSession,
+) -> Option<String> {
+    if readback.messages.len() != canonical.messages.len() {
+        return Some(format!(
+            "message count mismatch: wrote {} messages, read back {}",
+            canonical.messages.len(),
+            readback.messages.len()
+        ));
+    }
+
+    for (i, (orig, rb)) in canonical
+        .messages
+        .iter()
+        .zip(readback.messages.iter())
+        .enumerate()
+    {
+        if orig.role != rb.role {
+            return Some(format!(
+                "message role mismatch at idx {i}: wrote {:?}, read back {:?}",
+                orig.role, rb.role
+            ));
+        }
+        if orig.content != rb.content {
+            return Some(format!(
+                "message content mismatch at idx {i}: wrote {} bytes, read back {} bytes",
+                orig.content.len(),
+                rb.content.len()
+            ));
+        }
+    }
+
+    None
 }
 
 fn rollback_written_session(

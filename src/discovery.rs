@@ -198,7 +198,11 @@ impl ProviderRegistry {
     ) -> Result<ResolvedSession<'_>, CasrError> {
         debug!(path = %path.display(), "resolving session from explicit path");
 
-        if !path.is_file() {
+        // Some providers use "virtual" session paths that are not real files, e.g.
+        // `<db-file>/<session-id>` where the *parent* is the real file.
+        let parent_is_file = path.parent().is_some_and(|p| p.is_file());
+
+        if !path.is_file() && !parent_is_file {
             return Err(CasrError::SessionNotFound {
                 session_id: session_id.to_string(),
                 providers_checked: vec!["(direct path)".to_string()],
