@@ -1,8 +1,8 @@
 //! Provider trait and concrete provider implementations.
 //!
 //! Each supported provider (Claude Code, Codex, Gemini CLI, Cursor, Cline,
-//! Aider, Amp, OpenCode, ChatGPT, ClawdBot) implements the [`Provider`]
-//! trait to read/write sessions in its native format.
+//! Aider, Amp, OpenCode, ChatGPT, ClawdBot, Vibe, Factory) implements the
+//! [`Provider`] trait to read/write sessions in its native format.
 
 pub mod aider;
 pub mod amp;
@@ -12,8 +12,10 @@ pub mod clawdbot;
 pub mod cline;
 pub mod codex;
 pub mod cursor;
+pub mod factory;
 pub mod gemini;
 pub mod opencode;
+pub mod vibe;
 
 use std::path::{Path, PathBuf};
 

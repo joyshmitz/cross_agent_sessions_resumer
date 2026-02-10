@@ -34,6 +34,8 @@ fn casr_cmd(tmp: &TempDir) -> Command {
         .env("OPENCODE_HOME", tmp.path().join("opencode"))
         .env("CHATGPT_HOME", tmp.path().join("chatgpt"))
         .env("CLAWDBOT_HOME", tmp.path().join("clawdbot"))
+        .env("VIBE_HOME", tmp.path().join("vibe"))
+        .env("FACTORY_HOME", tmp.path().join("factory"))
         .env("XDG_CONFIG_HOME", tmp.path().join("xdg-config"))
         .env("XDG_DATA_HOME", tmp.path().join("xdg-data"))
         .env("NO_COLOR", "1");
@@ -239,8 +241,8 @@ fn contract_providers_json_shape() {
         .expect("providers --json should be an array");
     assert_eq!(
         arr.len(),
-        10,
-        "should list 10 providers (CC, Codex, Gemini, Cursor, Cline, Aider, Amp, OpenCode, ChatGPT, ClawdBot)"
+        12,
+        "should list 12 providers (CC, Codex, Gemini, Cursor, Cline, Aider, Amp, OpenCode, ChatGPT, ClawdBot, Vibe, Factory)"
     );
 
     for (i, item) in arr.iter().enumerate() {
@@ -274,6 +276,8 @@ fn contract_providers_known_slugs() {
     assert!(slugs.contains(&"amp"), "should contain amp");
     assert!(slugs.contains(&"opencode"), "should contain opencode");
     assert!(slugs.contains(&"clawdbot"), "should contain clawdbot");
+    assert!(slugs.contains(&"vibe"), "should contain vibe");
+    assert!(slugs.contains(&"factory"), "should contain factory");
 }
 
 #[test]
@@ -306,6 +310,8 @@ fn contract_providers_aliases_match_slugs() {
             "opencode" => assert_eq!(*alias, "opc"),
             "chatgpt" => assert_eq!(*alias, "gpt"),
             "clawdbot" => assert_eq!(*alias, "cwb"),
+            "vibe" => assert_eq!(*alias, "vib"),
+            "factory" => assert_eq!(*alias, "fac"),
             other => panic!("Unexpected slug: {other}"),
         }
     }
@@ -932,6 +938,8 @@ fn contract_list_provider_field_matches_slug() {
         "opencode",
         "chatgpt",
         "clawdbot",
+        "vibe",
+        "factory",
     ];
     for item in parsed.as_array().unwrap() {
         let provider = item["provider"].as_str().unwrap();

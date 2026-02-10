@@ -3,7 +3,8 @@
 //! Uses `assert_cmd` to invoke the compiled binary and validate output.
 //! All tests use temp directories with env overrides (`CLAUDE_HOME`,
 //! `CODEX_HOME`, `GEMINI_HOME`, `CURSOR_HOME`, `CLINE_HOME`, `AIDER_HOME`,
-//! `AMP_HOME`, `OPENCODE_HOME`) so they never touch real provider data.
+//! `AMP_HOME`, `OPENCODE_HOME`, `CHATGPT_HOME`, `CLAWDBOT_HOME`, `VIBE_HOME`,
+//! `FACTORY_HOME`) so they never touch real provider data.
 
 use std::fs;
 use std::path::PathBuf;
@@ -32,6 +33,10 @@ fn casr_cmd(tmp: &TempDir) -> Command {
         .env("AIDER_HOME", tmp.path().join("aider"))
         .env("AMP_HOME", tmp.path().join("amp"))
         .env("OPENCODE_HOME", tmp.path().join("opencode"))
+        .env("CHATGPT_HOME", tmp.path().join("chatgpt"))
+        .env("CLAWDBOT_HOME", tmp.path().join("clawdbot"))
+        .env("VIBE_HOME", tmp.path().join("vibe"))
+        .env("FACTORY_HOME", tmp.path().join("factory"))
         .env("XDG_CONFIG_HOME", tmp.path().join("xdg-config"))
         .env("XDG_DATA_HOME", tmp.path().join("xdg-data"))
         // Suppress colored output in tests.

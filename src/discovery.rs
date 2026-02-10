@@ -107,6 +107,8 @@ impl ProviderRegistry {
             Box::new(crate::providers::opencode::OpenCode),
             Box::new(crate::providers::chatgpt::ChatGpt),
             Box::new(crate::providers::clawdbot::ClawdBot),
+            Box::new(crate::providers::vibe::Vibe),
+            Box::new(crate::providers::factory::Factory),
         ])
     }
 
@@ -450,6 +452,10 @@ impl ProviderRegistry {
                     let value: serde_json::Value = serde_json::from_str(trimmed).ok()?;
                     if value.get("type").and_then(|v| v.as_str()) == Some("session_meta") {
                         return self.find_by_slug("codex");
+                    }
+                    // Factory: JSONL with session_start typed entry.
+                    if value.get("type").and_then(|v| v.as_str()) == Some("session_start") {
+                        return self.find_by_slug("factory");
                     }
                     if value.get("sessionId").is_some()
                         && value.get("uuid").is_some()
