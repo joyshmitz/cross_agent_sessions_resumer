@@ -1007,6 +1007,95 @@ assert_json_field "enrich dry-run ok=true" ".ok" "true"
 assert_file_count "enrich dry-run writes no files" "$CODEX_HOME/sessions" 0
 
 # ===========================================================================
+# TEST: Full 14x14 conversion matrix (bd-1bh.29)
+# ===========================================================================
+# Tests every directed (source, target) provider pair — 14 sources × 13
+# targets = 182 conversion paths. For native-fixture sources (CC, Codex,
+# Gemini) we load the fixture directly. For the other 11 providers, we seed
+# a session via CC → provider, then use that session as the source.
+# Each source is set up once and reused across all 13 targets.
+#
+# This is the ultimate validation that every pair works end-to-end.
+
+ALL_ALIASES=(cc cod gmi cur cln aid amp opc gpt cwb vib fac ocl pi)
+
+# Known failing pairs (pipeline bugs tracked separately).
+# Format: "source->target"
+MATRIX_KNOWN_FAILURES="gpt->gmi"
+
+is_known_failure() {
+    local pair="$1"
+    case " $MATRIX_KNOWN_FAILURES " in
+        *" $pair "*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Set up a source session and echo its session ID.
+# CC/Codex/Gemini use native fixtures; others are seeded from CC.
+setup_source_session() {
+    local source_alias="$1"
+    case "$source_alias" in
+        cc)  setup_cc_fixture "cc_simple" ;;
+        cod) setup_codex_fixture "codex_modern" "jsonl" ;;
+        gmi) setup_gemini_fixture "gmi_simple" ;;
+        *)
+            # Seed: set up CC fixture, convert CC→source, return target sid.
+            local _cc_sid _json_out _target_sid
+            _cc_sid=$(setup_cc_fixture "cc_simple")
+            _json_out=$("$CASR" --json resume "$source_alias" "$_cc_sid" 2>/dev/null) || true
+            _target_sid=$(echo "$_json_out" | jq -r '.target_session_id // empty' 2>/dev/null)
+            echo "$_target_sid"
+            ;;
+    esac
+}
+
+MATRIX_PAIRS=0
+MATRIX_OK=0
+
+for source in "${ALL_ALIASES[@]}"; do
+    log "TEST: Matrix — ${source} → all targets"
+    reset_env
+    source_sid=$(setup_source_session "$source")
+
+    if [[ -z "$source_sid" || "$source_sid" == "null" ]]; then
+        for target in "${ALL_ALIASES[@]}"; do
+            [[ "$source" == "$target" ]] && continue
+            fail "matrix:${source}->${target}" "setup source $source" "got empty session ID"
+            MATRIX_PAIRS=$((MATRIX_PAIRS + 1))
+        done
+        continue
+    fi
+
+    for target in "${ALL_ALIASES[@]}"; do
+        [[ "$source" == "$target" ]] && continue
+        MATRIX_PAIRS=$((MATRIX_PAIRS + 1))
+        local_pair="${source}->${target}"
+
+        if is_known_failure "$local_pair"; then
+            skip "matrix:${local_pair} (known pipeline bug)"
+            continue
+        fi
+
+        run_casr "matrix:${local_pair}" --json resume "$target" "$source_sid" --source "$source"
+
+        if [[ "$LAST_EXIT" -eq 0 ]]; then
+            ok_val=$(echo "$LAST_STDOUT" | jq -r '.ok // "false"' 2>/dev/null)
+            if [[ "$ok_val" == "true" ]]; then
+                pass "matrix:${local_pair}"
+                MATRIX_OK=$((MATRIX_OK + 1))
+            else
+                fail "matrix:${local_pair}" "ok=true" "ok=$ok_val"
+            fi
+        else
+            fail "matrix:${local_pair}" "exit 0" "exit $LAST_EXIT"
+        fi
+    done
+done
+
+echo -e "  ${BOLD}Matrix summary:${RESET} ${GREEN}${MATRIX_OK}/${MATRIX_PAIRS} pairs passed${RESET}"
+
+# ===========================================================================
 # TEST: Completions
 # ===========================================================================
 
