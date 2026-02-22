@@ -474,6 +474,27 @@ but resume may fail until the CLI is installed.",
     }
 }
 
+/// Coarse role bucket used for read-back verification.
+///
+/// Some target formats (notably Claude Code JSONL) don't distinguish between
+/// User, System, Tool, and Other roles — they all become `"user"` entries.
+/// When we read back the written session the roles come back as `User`,
+/// causing a spurious mismatch against the original `System`/`Tool`/`Other`.
+///
+/// This function maps every role to a small set of equivalence classes so the
+/// verification comparison is tolerant of this expected lossy round-trip.
+fn readback_role_bucket(role: &MessageRole) -> &'static str {
+    match role {
+        MessageRole::Assistant => "assistant",
+        // Everything else collapses into the "user" bucket because that is
+        // the only non-assistant entry type Claude Code (and similar formats)
+        // can represent.
+        MessageRole::User | MessageRole::System | MessageRole::Tool | MessageRole::Other(_) => {
+            "user"
+        }
+    }
+}
+
 fn readback_mismatch_detail(
     canonical: &CanonicalSession,
     readback: &CanonicalSession,
@@ -492,7 +513,7 @@ fn readback_mismatch_detail(
         .zip(readback.messages.iter())
         .enumerate()
     {
-        if orig.role != rb.role {
+        if readback_role_bucket(&orig.role) != readback_role_bucket(&rb.role) {
             return Some(format!(
                 "message role mismatch at idx {i}: wrote {:?}, read back {:?}",
                 orig.role, rb.role
