@@ -175,6 +175,16 @@ fn registry_find_by_slug_and_alias() {
         .expect("gmi alias should resolve");
     assert_eq!(gmi_alias.slug(), "gemini");
 
+    let claude_name = registry
+        .find_by_alias("claude")
+        .expect("claude standard name should resolve");
+    assert_eq!(claude_name.slug(), "claude-code");
+
+    let gemini_cli = registry
+        .find_by_alias("gemini-cli")
+        .expect("gemini-cli standard name should resolve");
+    assert_eq!(gemini_cli.slug(), "gemini");
+
     assert!(registry.find_by_slug("missing").is_none());
     assert!(registry.find_by_alias("missing").is_none());
 }

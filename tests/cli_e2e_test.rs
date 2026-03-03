@@ -258,6 +258,32 @@ fn cli_list_finds_cc_sessions() {
 }
 
 #[test]
+fn cli_list_shows_full_session_id_and_last_active_for_current_project_scope() {
+    let tmp = TempDir::new().unwrap();
+    let workspace = tmp.path().join("workspace");
+    fs::create_dir_all(&workspace).expect("create workspace");
+    let workspace_str = workspace.to_string_lossy().to_string();
+    let session_id = setup_cc_fixture_custom(
+        &tmp,
+        "cc_simple",
+        Some(&workspace_str),
+        Some("366bd160-20b3-4e69-b0be-5a559ef5ffec"),
+    );
+
+    casr_cmd(&tmp)
+        .current_dir(&workspace)
+        .arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "current working-directory project",
+        ))
+        .stdout(predicate::str::contains("Last Active"))
+        .stdout(predicate::str::contains(&session_id))
+        .stdout(predicate::str::contains("…").not());
+}
+
+#[test]
 fn cli_list_json_is_valid_array() {
     let tmp = TempDir::new().unwrap();
     setup_cc_fixture(&tmp, "cc_simple");
@@ -603,6 +629,40 @@ fn cli_resume_shorthand_gmi_flag_works_in_json_mode() {
 }
 
 #[test]
+fn cli_resume_standard_name_claude_target_works() {
+    let tmp = TempDir::new().unwrap();
+    let session_id = setup_codex_fixture(&tmp, "codex_modern", "jsonl");
+
+    casr_cmd(&tmp)
+        .args(["resume", "claude", &session_id, "--dry-run"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Would convert"))
+        .stdout(predicate::str::contains("claude-code"));
+}
+
+#[test]
+fn cli_resume_source_standard_name_claude_works() {
+    let tmp = TempDir::new().unwrap();
+    let session_id = setup_cc_fixture(&tmp, "cc_simple");
+
+    casr_cmd(&tmp)
+        .args([
+            "resume",
+            "codex",
+            &session_id,
+            "--source",
+            "claude",
+            "--dry-run",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Would convert"))
+        .stdout(predicate::str::contains("claude-code"))
+        .stdout(predicate::str::contains("codex"));
+}
+
+#[test]
 fn cli_list_defaults_to_current_workspace_and_top_10() {
     let tmp = TempDir::new().unwrap();
     let current_ws = std::env::current_dir().expect("current dir should be available");
@@ -675,6 +735,38 @@ fn cli_list_defaults_to_current_workspace_and_top_10() {
         arr.iter()
             .any(|e| e["session_id"].as_str() == Some(out_of_scope_sid)),
         "explicit workspace override should include out-of-scope fixture"
+    );
+}
+
+#[test]
+fn cli_list_provider_filter_accepts_claude_standard_name() {
+    let tmp = TempDir::new().unwrap();
+    setup_cc_fixture(&tmp, "cc_simple");
+
+    let output = casr_cmd(&tmp)
+        .args([
+            "--json",
+            "list",
+            "--provider",
+            "claude",
+            "--workspace",
+            "/data/projects/myapp",
+        ])
+        .output()
+        .expect("list --provider claude should run");
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("list --json should emit valid JSON");
+    let arr = parsed
+        .as_array()
+        .expect("list --json should return an array of sessions");
+    assert!(!arr.is_empty(), "should find at least one Claude session");
+    assert!(
+        arr.iter()
+            .all(|entry| entry["provider"].as_str() == Some("claude-code")),
+        "provider filter should only return Claude sessions"
     );
 }
 
