@@ -26,6 +26,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 urlencoding = "2"
 which = "7"
 rich_rust = "0.2.1"
+rayon = "1"
 
 [dev-dependencies]
 assert_cmd = "2"

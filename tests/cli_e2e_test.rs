@@ -279,6 +279,10 @@ fn cli_list_shows_full_session_id_and_last_active_for_current_project_scope() {
             "current working-directory project",
         ))
         .stdout(predicate::str::contains("Last Active"))
+        .stdout(predicate::str::contains("Size KB"))
+        .stdout(predicate::str::contains("Unique Users"))
+        .stdout(predicate::str::contains("Agent Avg Chars"))
+        .stdout(predicate::str::contains("Tool Uses"))
         .stdout(predicate::str::contains(&session_id))
         .stdout(predicate::str::contains("…").not());
 }
@@ -298,6 +302,11 @@ fn cli_list_json_is_valid_array() {
         serde_json::from_str(&stdout).expect("list --json should emit valid JSON");
     assert!(parsed.is_array());
     assert!(!parsed.as_array().unwrap().is_empty());
+    let first = &parsed.as_array().unwrap()[0];
+    assert!(first.get("file_size_kb").is_some());
+    assert!(first.get("unique_user_messages").is_some());
+    assert!(first.get("avg_agent_response_chars_rounded").is_some());
+    assert!(first.get("tool_uses").is_some());
 }
 
 #[test]
@@ -320,6 +329,51 @@ fn cli_list_limit_respects_bound() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
     assert_eq!(parsed.as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn cli_list_limit_applies_per_provider() {
+    let tmp = TempDir::new().unwrap();
+    setup_cc_fixture_custom(&tmp, "cc_simple", Some("/data/projects/backend"), None);
+    setup_codex_fixture(&tmp, "codex_modern", "jsonl");
+
+    let output = casr_cmd(&tmp)
+        .args([
+            "--json",
+            "list",
+            "--workspace",
+            "/data/projects/backend",
+            "--limit",
+            "1",
+        ])
+        .output()
+        .expect("list should run");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let sessions = parsed.as_array().expect("list --json should be an array");
+
+    let mut counts_by_provider: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    for session in sessions {
+        let provider = session["provider"]
+            .as_str()
+            .expect("provider should be present")
+            .to_string();
+        *counts_by_provider.entry(provider).or_insert(0) += 1;
+    }
+
+    assert!(
+        counts_by_provider.len() >= 2,
+        "expected at least two providers in scoped list"
+    );
+    for (provider, count) in &counts_by_provider {
+        assert!(
+            *count <= 1,
+            "expected per-provider limit=1, got {count} for provider {provider}"
+        );
+    }
 }
 
 #[test]

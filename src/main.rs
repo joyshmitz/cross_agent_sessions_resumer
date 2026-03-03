@@ -5,12 +5,14 @@
 //! CLI entry point: parses arguments, dispatches subcommands, renders output.
 
 use std::ffi::OsString;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use chrono::{Local, Utc};
 use clap::Parser;
 use colored::Colorize;
+use rayon::prelude::*;
 use rich_rust::prelude::{Cell, Column, Console, JustifyMethod, Row, Style, Table};
 use tracing_subscriber::EnvFilter;
 
@@ -81,7 +83,7 @@ enum Command {
         #[arg(long)]
         workspace: Option<String>,
 
-        /// Maximum sessions to show.
+        /// Maximum sessions to show per provider.
         #[arg(long, default_value = "10")]
         limit: usize,
 
@@ -395,12 +397,32 @@ fn cmd_list(
         workspace: Option<PathBuf>,
         started_at: Option<i64>,
         last_active_at: Option<i64>,
+        file_size_bytes: u64,
+        unique_user_messages: usize,
+        avg_agent_response_chars: f64,
+        tool_uses: usize,
         path: PathBuf,
     }
 
     impl SessionSummary {
         fn recency_value(&self) -> i64 {
             self.last_active_at.or(self.started_at).unwrap_or(0)
+        }
+
+        fn file_size_kb_rounded(&self) -> u64 {
+            ((self.file_size_bytes as f64) / 1024.0).round() as u64
+        }
+
+        fn file_size_display(&self) -> String {
+            format_with_commas(self.file_size_kb_rounded())
+        }
+
+        fn avg_agent_chars_rounded(&self) -> u64 {
+            self.avg_agent_response_chars.round() as u64
+        }
+
+        fn avg_agent_chars_display(&self) -> String {
+            format_with_commas(self.avg_agent_chars_rounded())
         }
 
         fn started_at_display(&self) -> String {
@@ -428,6 +450,13 @@ fn cmd_list(
                 "messages": self.messages,
                 "workspace": self.workspace.as_ref().map(|w| w.display().to_string()),
                 "started_at": self.started_at,
+                "last_active_at": self.last_active_at,
+                "file_size_bytes": self.file_size_bytes,
+                "file_size_kb": self.file_size_kb_rounded(),
+                "unique_user_messages": self.unique_user_messages,
+                "avg_agent_response_chars": self.avg_agent_response_chars,
+                "avg_agent_response_chars_rounded": self.avg_agent_chars_rounded(),
+                "tool_uses": self.tool_uses,
                 "path": self.path.display().to_string(),
             })
         }
@@ -501,25 +530,123 @@ fn cmd_list(
         format!("{days}d {hours:02}h {minutes:02}m {seconds:02}s {suffix}")
     }
 
-    fn provider_style(provider: &str) -> Style {
-        let style_str = match provider {
-            "claude-code" => "bold magenta",
-            "codex" => "bold cyan",
-            "gemini" => "bold yellow",
-            "cursor" => "bold blue",
-            "cline" => "bold green",
-            "aider" => "bold red",
-            "amp" => "bold bright_green",
-            "opencode" => "bold bright_magenta",
-            "chatgpt" => "bold bright_yellow",
-            "clawdbot" => "bold bright_cyan",
-            "vibe" => "bold white",
-            "factory" => "bold bright_blue",
-            "openclaw" => "bold bright_red",
-            "pi-agent" => "bold bright_white",
-            _ => "bold",
+    fn format_with_commas(value: u64) -> String {
+        let s = value.to_string();
+        let mut out = String::with_capacity(s.len() + (s.len() / 3));
+        for (i, ch) in s.chars().rev().enumerate() {
+            if i > 0 && i % 3 == 0 {
+                out.push(',');
+            }
+            out.push(ch);
+        }
+        out.chars().rev().collect()
+    }
+
+    fn codex_tool_uses_from_file(path: &Path) -> usize {
+        let Ok(file) = std::fs::File::open(path) else {
+            return 0;
         };
-        Style::parse(style_str).unwrap_or_default()
+        let reader = BufReader::new(file);
+        let mut count: usize = 0;
+
+        for line in reader.lines().map_while(Result::ok) {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Ok(entry) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+                continue;
+            };
+            if entry.get("type").and_then(|v| v.as_str()) != Some("response_item") {
+                continue;
+            }
+            let payload_type = entry
+                .pointer("/payload/type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if matches!(payload_type, "function_call" | "custom_tool_call") {
+                count = count.saturating_add(1);
+            }
+            if let Some(content) = entry.pointer("/payload/content").and_then(|v| v.as_array()) {
+                count = count.saturating_add(
+                    content
+                        .iter()
+                        .filter(|block| {
+                            block.get("type").and_then(|v| v.as_str()) == Some("tool_use")
+                        })
+                        .count(),
+                );
+            }
+        }
+
+        count
+    }
+
+    fn gemini_tool_uses_from_file(path: &Path) -> usize {
+        let Ok(content) = std::fs::read_to_string(path) else {
+            return 0;
+        };
+        let Ok(root) = serde_json::from_str::<serde_json::Value>(&content) else {
+            return 0;
+        };
+        let mut count: usize = 0;
+        if let Some(messages) = root.get("messages").and_then(|v| v.as_array()) {
+            for msg in messages {
+                if let Some(parts) = msg.get("content").and_then(|v| v.as_array()) {
+                    count = count.saturating_add(
+                        parts
+                            .iter()
+                            .filter(|part| {
+                                part.get("type").and_then(|v| v.as_str()) == Some("tool_use")
+                            })
+                            .count(),
+                    );
+                }
+                if let Some(tool_calls) = msg.get("toolCalls").and_then(|v| v.as_array()) {
+                    count = count.saturating_add(tool_calls.len());
+                }
+            }
+        }
+        count
+    }
+
+    fn claude_tool_uses_from_file(path: &Path) -> usize {
+        let Ok(file) = std::fs::File::open(path) else {
+            return 0;
+        };
+        let reader = BufReader::new(file);
+        let mut count: usize = 0;
+
+        for line in reader.lines().map_while(Result::ok) {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Ok(entry) = serde_json::from_str::<serde_json::Value>(trimmed) else {
+                continue;
+            };
+            if let Some(content) = entry.pointer("/message/content").and_then(|v| v.as_array()) {
+                count = count.saturating_add(
+                    content
+                        .iter()
+                        .filter(|block| {
+                            block.get("type").and_then(|v| v.as_str()) == Some("tool_use")
+                        })
+                        .count(),
+                );
+            }
+        }
+
+        count
+    }
+
+    fn tool_uses_from_source_file(provider_slug: &str, path: &Path) -> usize {
+        match provider_slug {
+            "codex" => codex_tool_uses_from_file(path),
+            "gemini" => gemini_tool_uses_from_file(path),
+            "claude-code" => claude_tool_uses_from_file(path),
+            _ => 0,
+        }
     }
 
     fn message_count_style(message_count: usize) -> Style {
@@ -572,6 +699,88 @@ fn cmd_list(
             "openclaw" => "openclaw",
             "pi-agent" => "pi-agent",
             _ => provider,
+        }
+    }
+
+    fn normalize_user_message_for_uniqueness(content: &str) -> Option<String> {
+        let normalized = content.split_whitespace().collect::<Vec<_>>().join(" ");
+        if normalized.is_empty() {
+            None
+        } else {
+            Some(normalized)
+        }
+    }
+
+    fn session_metrics(
+        provider_slug: &str,
+        session: &casr::model::CanonicalSession,
+        path: &Path,
+    ) -> (u64, usize, f64, usize) {
+        let file_size_bytes = path.metadata().map(|meta| meta.len()).unwrap_or(0);
+
+        let mut unique_user_messages: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        let mut assistant_chars_total: usize = 0;
+        let mut assistant_responses: usize = 0;
+        let mut canonical_tool_uses: usize = 0;
+
+        for msg in &session.messages {
+            canonical_tool_uses = canonical_tool_uses.saturating_add(msg.tool_calls.len());
+
+            if msg.role == casr::model::MessageRole::User
+                && let Some(normalized) = normalize_user_message_for_uniqueness(&msg.content)
+            {
+                unique_user_messages.insert(normalized);
+            }
+
+            if msg.role == casr::model::MessageRole::Assistant {
+                let char_count = msg.content.chars().count();
+                if char_count > 0 {
+                    assistant_chars_total = assistant_chars_total.saturating_add(char_count);
+                    assistant_responses = assistant_responses.saturating_add(1);
+                }
+            }
+        }
+
+        let avg_agent_response_chars = if assistant_responses > 0 {
+            assistant_chars_total as f64 / assistant_responses as f64
+        } else {
+            0.0
+        };
+
+        let fallback_tool_uses = tool_uses_from_source_file(provider_slug, path);
+        let tool_uses = canonical_tool_uses.max(fallback_tool_uses);
+
+        (
+            file_size_bytes,
+            unique_user_messages.len(),
+            avg_agent_response_chars,
+            tool_uses,
+        )
+    }
+
+    fn build_summary(
+        provider_slug: &str,
+        path: PathBuf,
+        session: casr::model::CanonicalSession,
+    ) -> SessionSummary {
+        let last_active_at = session_activity_millis(&session, &path);
+        let (file_size_bytes, unique_user_messages, avg_agent_response_chars, tool_uses) =
+            session_metrics(provider_slug, &session, &path);
+
+        SessionSummary {
+            session_id: session.session_id,
+            provider: provider_slug.to_string(),
+            title: session.title,
+            messages: session.messages.len(),
+            workspace: session.workspace,
+            started_at: session.started_at,
+            last_active_at,
+            file_size_bytes,
+            unique_user_messages,
+            avg_agent_response_chars,
+            tool_uses,
+            path,
         }
     }
 
@@ -771,28 +980,18 @@ fn cmd_list(
                 listed.truncate(probe_limit);
             }
 
-            for (session_id, path) in listed {
-                if !workspace_hint_matches(provider.slug(), &path, workspace_filter.as_ref()) {
-                    continue;
-                }
-                match provider.read_session(&path) {
-                    Ok(session) => {
-                        let last_active_at = session_activity_millis(&session, &path);
-                        sessions.push(SessionSummary {
-                            session_id: session.session_id,
-                            provider: provider.slug().to_string(),
-                            title: session.title,
-                            messages: session.messages.len(),
-                            workspace: session.workspace,
-                            started_at: session.started_at,
-                            last_active_at,
-                            path,
-                        });
+            let provider_slug = provider.slug().to_string();
+            let parsed: Vec<SessionSummary> = listed
+                .into_par_iter()
+                .filter_map(|(_session_id, path)| {
+                    if !workspace_hint_matches(&provider_slug, &path, workspace_filter.as_ref()) {
+                        return None;
                     }
-                    Err(_) => continue,
-                }
-                let _ = session_id; // returned by provider for reference
-            }
+                    let session = provider.read_session(&path).ok()?;
+                    Some(build_summary(&provider_slug, path, session))
+                })
+                .collect();
+            sessions.extend(parsed);
             continue;
         }
 
@@ -836,25 +1035,15 @@ fn cmd_list(
             candidate_paths.truncate(probe_limit);
         }
 
-        for path in candidate_paths {
-            // Try to read session metadata.
-            match provider.read_session(&path) {
-                Ok(session) => {
-                    let last_active_at = session_activity_millis(&session, &path);
-                    sessions.push(SessionSummary {
-                        session_id: session.session_id,
-                        provider: provider.slug().to_string(),
-                        title: session.title,
-                        messages: session.messages.len(),
-                        workspace: session.workspace,
-                        started_at: session.started_at,
-                        last_active_at,
-                        path,
-                    });
-                }
-                Err(_) => continue,
-            }
-        }
+        let provider_slug = provider.slug().to_string();
+        let parsed: Vec<SessionSummary> = candidate_paths
+            .into_par_iter()
+            .filter_map(|path| {
+                let session = provider.read_session(&path).ok()?;
+                Some(build_summary(&provider_slug, path, session))
+            })
+            .collect();
+        sessions.extend(parsed);
     }
 
     if let Some(filter) = workspace_filter.as_ref() {
@@ -865,32 +1054,56 @@ fn cmd_list(
         });
     }
 
-    match sort {
-        "date" => sessions.sort_by_key(|s| std::cmp::Reverse(s.recency_value())),
-        "messages" => sessions.sort_by(|a, b| {
-            b.messages
-                .cmp(&a.messages)
-                .then_with(|| b.recency_value().cmp(&a.recency_value()))
-        }),
-        "provider" => sessions.sort_by(|a, b| {
-            a.provider
-                .cmp(&b.provider)
-                .then_with(|| b.recency_value().cmp(&a.recency_value()))
-        }),
-        other => {
-            return Err(anyhow::anyhow!(
-                "Unknown sort field '{other}'. Expected one of: date, messages, provider."
-            ));
-        }
+    let mut sessions_by_provider: std::collections::BTreeMap<String, Vec<SessionSummary>> =
+        std::collections::BTreeMap::new();
+    for session in sessions {
+        sessions_by_provider
+            .entry(session.provider.clone())
+            .or_default()
+            .push(session);
     }
-    sessions.truncate(limit);
-    tracing::debug!(sessions = sessions.len(), sort, "list sessions complete");
+
+    for provider_sessions in sessions_by_provider.values_mut() {
+        match sort {
+            "date" => provider_sessions.sort_by_key(|s| std::cmp::Reverse(s.recency_value())),
+            "messages" => provider_sessions.sort_by(|a, b| {
+                b.messages
+                    .cmp(&a.messages)
+                    .then_with(|| b.recency_value().cmp(&a.recency_value()))
+            }),
+            "provider" => provider_sessions.sort_by_key(|s| std::cmp::Reverse(s.recency_value())),
+            other => {
+                return Err(anyhow::anyhow!(
+                    "Unknown sort field '{other}'. Expected one of: date, messages, provider."
+                ));
+            }
+        }
+        provider_sessions.truncate(limit);
+    }
+
+    let non_empty_group_count = sessions_by_provider
+        .values()
+        .filter(|sessions| !sessions.is_empty())
+        .count();
+    let total_sessions_kept: usize = sessions_by_provider.values().map(Vec::len).sum();
+    tracing::debug!(
+        providers = non_empty_group_count,
+        sessions = total_sessions_kept,
+        sort,
+        limit,
+        "list sessions complete"
+    );
 
     if json_mode {
-        let json: Vec<serde_json::Value> = sessions.iter().map(SessionSummary::to_json).collect();
+        let mut json: Vec<serde_json::Value> = Vec::new();
+        for sessions in sessions_by_provider.values() {
+            for session in sessions {
+                json.push(session.to_json());
+            }
+        }
         println!("{}", serde_json::to_string_pretty(&json)?);
     } else {
-        if sessions.is_empty() {
+        if non_empty_group_count == 0 {
             println!(
                 "No sessions found for {} {}. Run {} to check provider status.",
                 workspace_scope_label.cyan(),
@@ -905,56 +1118,93 @@ fn cmd_list(
             "[bold cyan]Project-scoped sessions[/] for [bold]{workspace_scope}[/]"
         ));
         console.print(&format!("[dim]Scope:[/] [bold]{workspace_scope_label}[/]"));
-
-        let mut table = Table::new()
-            .title(format!(
-                "Top {} Most Recently Active Sessions in This Project",
-                sessions.len()
-            ))
-            .header_style(Style::parse("bold black on bright_white").unwrap_or_default())
-            .border_style(Style::parse("cyan").unwrap_or_default())
-            .with_column(Column::new("#").justify(JustifyMethod::Right).width(3))
-            .with_column(
-                Column::new("Provider")
-                    .justify(JustifyMethod::Left)
-                    .width(12),
-            )
-            .with_column(Column::new("Session ID").min_width(36))
-            .with_column(Column::new("Msgs").justify(JustifyMethod::Right).width(6))
-            .with_column(
-                Column::new("Started")
-                    .justify(JustifyMethod::Left)
-                    .width(16),
-            )
-            .with_column(
-                Column::new("Last Active")
-                    .justify(JustifyMethod::Left)
-                    .min_width(22),
-            );
+        console.print(&format!(
+            "[dim]Showing up to[/] [bold]{limit}[/] [dim]most recent sessions per provider[/]"
+        ));
 
         let now_millis = Utc::now().timestamp_millis();
 
-        for (idx, s) in sessions.iter().enumerate() {
-            let rank = (idx + 1).to_string();
-            let provider = provider_display(&s.provider);
-            let provider_cell_style = provider_style(provider);
-            let session_id = s.session_id.as_str();
-            let messages = s.messages.to_string();
-            let messages_cell_style = message_count_style(s.messages);
-            let started = s.started_at_display();
-            let last_active = s.last_active_display(now_millis);
-            let last_active_cell_style = last_active_style(s.last_active_at, now_millis);
-            table.add_row(Row::new(vec![
-                Cell::new(rank.as_str()),
-                Cell::new(provider).style(provider_cell_style),
-                Cell::new(session_id),
-                Cell::new(messages.as_str()).style(messages_cell_style),
-                Cell::new(started.as_str()),
-                Cell::new(last_active.as_str()).style(last_active_cell_style),
-            ]));
-        }
+        for (provider_slug, provider_sessions) in &sessions_by_provider {
+            if provider_sessions.is_empty() {
+                continue;
+            }
 
-        console.print_renderable(&table);
+            let provider = provider_display(provider_slug);
+            console.print(&format!(
+                "[bold]{}[/]: {} session(s)",
+                provider.to_uppercase(),
+                provider_sessions.len()
+            ));
+
+            let mut table = Table::new()
+                .title(format!(
+                    "Top {} Most Recently Active {} Sessions in This Project",
+                    provider_sessions.len(),
+                    provider
+                ))
+                .header_style(Style::parse("bold black on bright_white").unwrap_or_default())
+                .border_style(Style::parse("cyan").unwrap_or_default())
+                .with_column(Column::new("#").justify(JustifyMethod::Right).width(3))
+                .with_column(Column::new("Session ID").min_width(36))
+                .with_column(Column::new("Msgs").justify(JustifyMethod::Right).width(6))
+                .with_column(
+                    Column::new("Size KB")
+                        .justify(JustifyMethod::Right)
+                        .width(8),
+                )
+                .with_column(
+                    Column::new("Unique Users")
+                        .justify(JustifyMethod::Right)
+                        .width(12),
+                )
+                .with_column(
+                    Column::new("Agent Avg Chars")
+                        .justify(JustifyMethod::Right)
+                        .width(15),
+                )
+                .with_column(
+                    Column::new("Tool Uses")
+                        .justify(JustifyMethod::Right)
+                        .width(10),
+                )
+                .with_column(
+                    Column::new("Started")
+                        .justify(JustifyMethod::Left)
+                        .width(16),
+                )
+                .with_column(
+                    Column::new("Last Active")
+                        .justify(JustifyMethod::Left)
+                        .min_width(22),
+                );
+
+            for (idx, s) in provider_sessions.iter().enumerate() {
+                let rank = (idx + 1).to_string();
+                let session_id = s.session_id.as_str();
+                let messages = s.messages.to_string();
+                let messages_cell_style = message_count_style(s.messages);
+                let size_kb = s.file_size_display();
+                let unique_users = format_with_commas(s.unique_user_messages as u64);
+                let avg_agent = s.avg_agent_chars_display();
+                let tool_uses = format_with_commas(s.tool_uses as u64);
+                let started = s.started_at_display();
+                let last_active = s.last_active_display(now_millis);
+                let last_active_cell_style = last_active_style(s.last_active_at, now_millis);
+                table.add_row(Row::new(vec![
+                    Cell::new(rank.as_str()),
+                    Cell::new(session_id),
+                    Cell::new(messages.as_str()).style(messages_cell_style),
+                    Cell::new(size_kb.as_str()),
+                    Cell::new(unique_users.as_str()),
+                    Cell::new(avg_agent.as_str()),
+                    Cell::new(tool_uses.as_str()),
+                    Cell::new(started.as_str()),
+                    Cell::new(last_active.as_str()).style(last_active_cell_style),
+                ]));
+            }
+
+            console.print_renderable(&table);
+        }
         console.print("[dim]Tip:[/] run [bold]casr info <session-id>[/] for full metadata.");
     }
 
