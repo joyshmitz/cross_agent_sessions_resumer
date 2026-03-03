@@ -13,11 +13,14 @@
 #   --dest DIR         Install to DIR (default: ~/.local/bin)
 #   --system           Install to /usr/local/bin (requires sudo)
 #   --easy-mode        Auto-update PATH in shell rc files
+#   --yes              Non-interactive; auto-accept install prompts
 #   --verify           Run self-test after install
 #   --from-source      Build from source instead of downloading binary
 #   --quiet            Suppress non-error output
 #   --no-gum           Disable gum formatting even if available
 #   --no-verify        Skip checksum + signature verification (not recommended)
+#   --no-configure     Skip agent auto-configuration (skills/wrappers)
+#   --no-skill         Skip skill installation for Claude/Codex
 #   --offline TARBALL  Install from local tarball (airgap mode)
 #   --force            Reinstall even if same version exists
 #
@@ -43,6 +46,7 @@ BINARY_NAME="casr"
 DEST_DEFAULT="$HOME/.local/bin"
 DEST="${DEST:-$DEST_DEFAULT}"
 EASY=0
+ASSUME_YES=0
 QUIET=0
 VERIFY=0
 FROM_SOURCE=0
@@ -53,12 +57,19 @@ COSIGN_IDENTITY_RE="${COSIGN_IDENTITY_RE:-^https://github.com/${OWNER}/${REPO}/.
 COSIGN_OIDC_ISSUER="${COSIGN_OIDC_ISSUER:-https://token.actions.githubusercontent.com}"
 ARTIFACT_URL="${ARTIFACT_URL:-}"
 LOCK_FILE="/tmp/casr-install.lock"
-SYSTEM=0
 NO_GUM=0
 NO_CHECKSUM=0
+NO_CONFIGURE=0
+NO_SKILL=0
 FORCE_INSTALL=0
 OFFLINE_TARBALL=""
 PROVIDER_VERSION_TIMEOUT="${CASR_INSTALLER_PROVIDER_VERSION_TIMEOUT:-1}"
+SKILL_ARCHIVE_STATUS="not-attempted"
+CLAUDE_SKILL_STATUS="not-detected"
+CODEX_SKILL_STATUS="not-detected"
+CC_WRAPPER_STATUS="not-attempted"
+COD_WRAPPER_STATUS="not-attempted"
+GMI_WRAPPER_STATUS="not-attempted"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Output System (Gum + ANSI Dual-Path)
@@ -74,35 +85,35 @@ log() { [ "$QUIET" -eq 1 ] && return 0; echo -e "$@"; }
 info() {
   [ "$QUIET" -eq 1 ] && return 0
   if [ "$HAS_GUM" -eq 1 ] && [ "$NO_GUM" -eq 0 ]; then
-    gum style --foreground 39 "-> $*"
+    gum style --foreground 39 "→ $*"
   else
-    echo -e "\033[0;34m->\033[0m $*"
+    echo -e "\033[0;34m→\033[0m $*"
   fi
 }
 
 ok() {
   [ "$QUIET" -eq 1 ] && return 0
   if [ "$HAS_GUM" -eq 1 ] && [ "$NO_GUM" -eq 0 ]; then
-    gum style --foreground 42 "ok $*"
+    gum style --foreground 42 "✓ $*"
   else
-    echo -e "\033[0;32mok\033[0m $*"
+    echo -e "\033[0;32m✓\033[0m $*"
   fi
 }
 
 warn() {
   [ "$QUIET" -eq 1 ] && return 0
   if [ "$HAS_GUM" -eq 1 ] && [ "$NO_GUM" -eq 0 ]; then
-    gum style --foreground 214 "!! $*"
+    gum style --foreground 214 "⚠ $*"
   else
-    echo -e "\033[1;33m!!\033[0m $*"
+    echo -e "\033[1;33m⚠\033[0m $*"
   fi
 }
 
 err() {
   if [ "$HAS_GUM" -eq 1 ] && [ "$NO_GUM" -eq 0 ]; then
-    gum style --foreground 196 "xx $*"
+    gum style --foreground 196 "✗ $*" >&2
   else
-    echo -e "\033[0;31mxx\033[0m $*"
+    echo -e "\033[0;31m✗\033[0m $*" >&2
   fi
 }
 
@@ -117,7 +128,8 @@ run_with_spinner() {
   fi
 }
 
-# Draw a box around text with automatic width calculation
+# Draw a box around text with automatic width calculation.
+# Uses Unicode double-line box characters for consistent visual structure.
 # Usage: draw_box "color_code" "line1" "line2" ...
 draw_box() {
   local color="$1"
@@ -140,10 +152,10 @@ draw_box() {
   local inner_width=$((max_width + 4))
   local border=""
   for ((i=0; i<inner_width; i++)); do
-    border+="="
+    border+="═"
   done
 
-  printf "\033[%sm+%s+\033[0m\n" "$color" "$border"
+  printf "\033[%sm╔%s╗\033[0m\n" "$color" "$border"
 
   for line in "${lines[@]}"; do
     local stripped
@@ -154,10 +166,10 @@ draw_box() {
     for ((i=0; i<padding; i++)); do
       pad_str+=" "
     done
-    printf "\033[%sm|\033[0m  %b%s  \033[%sm|\033[0m\n" "$color" "$line" "$pad_str" "$color"
+    printf "\033[%sm║\033[0m  %b%s  \033[%sm║\033[0m\n" "$color" "$line" "$pad_str" "$color"
   done
 
-  printf "\033[%sm+%s+\033[0m\n" "$color" "$border"
+  printf "\033[%sm╚%s╝\033[0m\n" "$color" "$border"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -307,9 +319,9 @@ print_detected_providers() {
     local ver_info=""
     [[ -n "$ver" ]] && ver_info=" ($ver)"
     if [ "$HAS_GUM" -eq 1 ] && [ "$NO_GUM" -eq 0 ]; then
-      gum style --foreground 42 "  ok ${name} [${alias}]${ver_info}"
+      gum style --foreground 42 "  ✓ ${name} [${alias}]${ver_info}"
     else
-      echo -e "  \033[0;32mok\033[0m ${name} [${alias}]${ver_info}"
+      echo -e "  \033[0;32m✓\033[0m ${name} [${alias}]${ver_info}"
     fi
   }
 
@@ -341,6 +353,196 @@ print_detected_providers() {
   else
     info "Install a second provider to enable cross-provider session conversion"
   fi
+}
+
+# Returns 0 if a provider slug is present in DETECTED_PROVIDERS.
+has_provider() {
+  local needle="$1"
+  local provider=""
+  for provider in "${DETECTED_PROVIDERS[@]}"; do
+    if [ "$provider" = "$needle" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Agent Auto-Configuration (Skills + Wrapper Commands)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+CASR_SKILL_ARCHIVE=""
+
+write_inline_skill() {
+  local dest="$1"
+  mkdir -p "$dest"
+  cat > "$dest/SKILL.md" <<'SKILL_EOF'
+---
+name: casr
+description: >-
+  Cross Agent Session Resumer. Convert and resume sessions across Claude Code,
+  Codex, Gemini, and other providers.
+---
+
+# casr — Cross Agent Session Resumer
+
+Use `casr` when you need to keep working on the same session but switch providers.
+
+## Fast Path
+
+```bash
+casr list
+casr info <session-id>
+casr -cc <session-id>   # open in Claude Code
+casr -cod <session-id>  # open in Codex
+casr -gmi <session-id>  # open in Gemini
+```
+
+## Helpful Commands
+
+```bash
+casr providers
+casr list --workspace "$(pwd)" --sort date --limit 20
+casr resume codex <session-id> --source claude
+casr info <session-id> --json
+```
+
+## Notes
+
+- `casr list` is project-scoped to your current working directory by default.
+- `-cc`, `-cod`, and `-gmi` auto-detect source provider from the session ID.
+- Use `--json` output mode for automation.
+SKILL_EOF
+}
+
+download_skill_archive() {
+  [ "$NO_SKILL" -eq 1 ] && return 1
+
+  local dest="$TMP/casr-skill.tar.gz"
+  local urls=(
+    "https://github.com/${OWNER}/${REPO}/releases/download/${VERSION}/skill.tar.gz"
+    "https://github.com/${OWNER}/${REPO}/releases/latest/download/skill.tar.gz"
+  )
+  local url=""
+  for url in "${urls[@]}"; do
+    if curl -fsSL "${PROXY_ARGS[@]}" "$url" -o "$dest" 2>/dev/null; then
+      if tar -tzf "$dest" >/dev/null 2>&1; then
+        CASR_SKILL_ARCHIVE="$dest"
+        SKILL_ARCHIVE_STATUS="downloaded (${url})"
+        return 0
+      fi
+    fi
+  done
+  SKILL_ARCHIVE_STATUS="not-found (inline fallback)"
+  return 1
+}
+
+install_skill_for_agent() {
+  local agent_label="$1"
+  local skills_root="$2"
+  local status_var="$3"
+
+  if [ "$NO_SKILL" -eq 1 ]; then
+    printf -v "$status_var" '%s' "skipped (--no-skill)"
+    return 0
+  fi
+
+  if [ -n "$CASR_SKILL_ARCHIVE" ]; then
+    mkdir -p "$skills_root"
+    if tar -xzf "$CASR_SKILL_ARCHIVE" -C "$skills_root" 2>/dev/null \
+      && [ -f "$skills_root/casr/SKILL.md" ]; then
+      printf -v "$status_var" '%s' "installed (release skill.tar.gz)"
+      return 0
+    fi
+  fi
+
+  local skill_dir="$skills_root/casr"
+  write_inline_skill "$skill_dir"
+  if [ -f "$skill_dir/SKILL.md" ]; then
+    printf -v "$status_var" '%s' "installed (inline fallback)"
+  else
+    printf -v "$status_var" '%s' "failed"
+    warn "$agent_label skill install failed"
+  fi
+}
+
+configure_agent_skills() {
+  if [ "$NO_CONFIGURE" -eq 1 ]; then
+    CLAUDE_SKILL_STATUS="skipped (--no-configure)"
+    CODEX_SKILL_STATUS="skipped (--no-configure)"
+    SKILL_ARCHIVE_STATUS="skipped (--no-configure)"
+    return 0
+  fi
+
+  if [ "$NO_SKILL" -eq 1 ]; then
+    SKILL_ARCHIVE_STATUS="skipped (--no-skill)"
+  fi
+
+  download_skill_archive || true
+
+  if has_provider "claude-code" || [ -d "$HOME/.claude" ] || command -v claude >/dev/null 2>&1; then
+    install_skill_for_agent "Claude Code" "$HOME/.claude/skills" CLAUDE_SKILL_STATUS
+  else
+    CLAUDE_SKILL_STATUS="not-detected"
+  fi
+
+  if has_provider "codex" || [ -d "$HOME/.codex" ] || command -v codex >/dev/null 2>&1; then
+    install_skill_for_agent "Codex" "$HOME/.codex/skills" CODEX_SKILL_STATUS
+  else
+    CODEX_SKILL_STATUS="not-detected"
+  fi
+}
+
+install_wrapper_command() {
+  local alias_name="$1"
+  local target_name="$2"
+  local status_var="$3"
+  local wrapper_path="$DEST/$alias_name"
+  local marker="# casr-installer-wrapper"
+  local target_path=""
+
+  if [ "$NO_CONFIGURE" -eq 1 ]; then
+    printf -v "$status_var" '%s' "skipped (--no-configure)"
+    return 0
+  fi
+
+  if ! target_path=$(command -v "$target_name" 2>/dev/null); then
+    printf -v "$status_var" '%s' "skipped (missing '$target_name')"
+    return 0
+  fi
+
+  if command -v "$alias_name" >/dev/null 2>&1; then
+    local current_alias_path=""
+    current_alias_path=$(command -v "$alias_name" 2>/dev/null || true)
+    if [ "$current_alias_path" != "$wrapper_path" ]; then
+      printf -v "$status_var" '%s' "already exists on PATH (${current_alias_path})"
+      return 0
+    fi
+  fi
+
+  if [ -f "$wrapper_path" ] && ! grep -Fq "$marker" "$wrapper_path" 2>/dev/null; then
+    printf -v "$status_var" '%s' "skipped (existing unmanaged file at $wrapper_path)"
+    return 0
+  fi
+
+  cat > "$wrapper_path" <<EOF
+#!/usr/bin/env bash
+$marker
+exec "${target_path}" "\$@"
+EOF
+  chmod 0755 "$wrapper_path"
+  printf -v "$status_var" '%s' "installed ($wrapper_path -> $target_name)"
+}
+
+configure_provider_wrappers() {
+  install_wrapper_command "cc" "claude" CC_WRAPPER_STATUS
+  install_wrapper_command "cod" "codex" COD_WRAPPER_STATUS
+  install_wrapper_command "gmi" "gemini" GMI_WRAPPER_STATUS
+}
+
+configure_agents() {
+  configure_provider_wrappers
+  configure_agent_skills
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -387,7 +589,7 @@ ARCH=""
 TARGET=""
 
 detect_platform() {
-  OS=$(uname -s | tr 'A-Z' 'a-z')
+  OS=$(uname -s | tr '[:upper:]' '[:lower:]')
   ARCH=$(uname -m)
   case "$ARCH" in
     x86_64|amd64) ARCH="x86_64" ;;
@@ -584,7 +786,8 @@ verify_sigstore_bundle() {
     bundle_url="${artifact_url}.sigstore.json"
   fi
 
-  local bundle_file="$TMP/$(basename "$bundle_url")"
+  local bundle_file=""
+  bundle_file="$TMP/$(basename "$bundle_url")"
   info "Fetching sigstore bundle from ${bundle_url}"
   if ! curl -fsSL "${PROXY_ARGS[@]}" "$bundle_url" -o "$bundle_file" 2>/dev/null; then
     warn "Sigstore bundle not found; skipping signature verification"
@@ -613,7 +816,9 @@ ensure_rust() {
     return 0
   fi
   if command -v cargo >/dev/null 2>&1 && rustc --version 2>/dev/null | grep -q nightly; then return 0; fi
-  if [ "$EASY" -ne 1 ]; then
+  if [ "$ASSUME_YES" -eq 1 ] || [ "$EASY" -eq 1 ]; then
+    info "Auto-accepting Rust nightly install (--yes/--easy-mode)"
+  else
     if [ -t 0 ]; then
       echo -n "Install Rust nightly via rustup? (y/N): "
       read -r ans
@@ -753,8 +958,7 @@ run_self_test() {
   fi
 
   # Test 2: providers command
-  local prov_output
-  if prov_output=$("$bin" providers 2>&1); then
+  if "$bin" providers >/dev/null 2>&1; then
     ok "Self-test: providers command works"
   else
     warn "Self-test: providers command returned non-zero (some providers may not be installed)"
@@ -783,11 +987,14 @@ Options:
   --dest DIR         Install to DIR (default: ~/.local/bin)
   --system           Install to /usr/local/bin (requires sudo)
   --easy-mode        Auto-update PATH in shell rc files
+  --yes              Non-interactive; auto-accept install prompts
   --verify           Run self-test after install
   --from-source      Build from source instead of downloading binary
   --quiet            Suppress non-error output
   --no-gum           Disable gum formatting even if available
   --no-verify        Skip checksum + signature verification (not recommended)
+  --no-configure     Skip agent auto-configuration (skills/wrappers)
+  --no-skill         Skip skill installation for Claude/Codex
   --offline TARBALL  Install from local tarball (airgap mode)
   --force            Force reinstall even if same version is installed
 
@@ -800,19 +1007,22 @@ Environment:
 
 Examples:
   # Install latest release
-  curl -fsSL "https://raw.githubusercontent.com/Dicklesworthstone/cross_agent_session_resumer/main/install.sh?$(date +%s)" | bash
+  curl -fsSL "https://raw.githubusercontent.com/Dicklesworthstone/cross_agent_session_resumer/main/install.sh?\$(date +%s)" | bash
 
   # Install specific version with self-test
   bash install.sh --version v0.2.0 --verify
 
-  # Install system-wide with auto-PATH
-  sudo bash install.sh --system --easy-mode
+  # Install system-wide with auto-PATH + non-interactive prompts
+  sudo bash install.sh --system --easy-mode --yes
 
   # Offline / airgap install
   bash install.sh --offline ./casr-x86_64-unknown-linux-musl.tar.xz
 
   # Build from source (requires Rust nightly)
   bash install.sh --from-source
+
+  # Install but skip any local agent configuration writes
+  bash install.sh --no-configure --no-skill
 EOFU
 }
 
@@ -826,8 +1036,9 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --version)      needs_arg "$@"; VERSION="$2"; shift 2 ;;
     --dest)         needs_arg "$@"; DEST="$2"; shift 2 ;;
-    --system)       SYSTEM=1; DEST="/usr/local/bin"; shift ;;
+    --system)       DEST="/usr/local/bin"; shift ;;
     --easy-mode)    EASY=1; shift ;;
+    --yes)          ASSUME_YES=1; shift ;;
     --verify)       VERIFY=1; shift ;;
     --artifact-url) needs_arg "$@"; ARTIFACT_URL="$2"; shift 2 ;;
     --checksum)     needs_arg "$@"; CHECKSUM="$2"; shift 2 ;;
@@ -836,10 +1047,16 @@ while [ $# -gt 0 ]; do
     --quiet|-q)     QUIET=1; shift ;;
     --no-gum)       NO_GUM=1; shift ;;
     --no-verify)    NO_CHECKSUM=1; shift ;;
+    --no-configure) NO_CONFIGURE=1; shift ;;
+    --no-skill)     NO_SKILL=1; shift ;;
     --force)        FORCE_INSTALL=1; shift ;;
     --offline)      needs_arg "$@"; OFFLINE_TARBALL="$2"; shift 2 ;;
     -h|--help)      usage; exit 0 ;;
-    *)              warn "Unknown option: $1 (ignored)"; shift ;;
+    *)
+      err "Unknown option: $1"
+      usage
+      exit 1
+      ;;
   esac
 done
 
@@ -888,23 +1105,17 @@ mkdir -p "$DEST" 2>/dev/null || true
 # Preflight
 preflight_checks
 
-# Check if already at target version
-if [ "$FORCE_INSTALL" -eq 0 ] && check_installed_version "$VERSION"; then
-  ok "casr $VERSION is already installed at $DEST/$BINARY_NAME"
-  info "Use --force to reinstall"
-  maybe_install_completions
-  if [ "$VERIFY" -eq 1 ]; then
-    run_self_test
-  fi
-  exit 0
-fi
-
 # ═══════════════════════════════════════════════════════════════════════════════
 # Atomic Locking (mkdir-based, cross-platform)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 LOCK_DIR="${LOCK_FILE}.d"
 LOCKED=0
+release_lock_dir() {
+  rm -f "$LOCK_DIR/pid" 2>/dev/null || true
+  rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+
 if mkdir "$LOCK_DIR" 2>/dev/null; then
   LOCKED=1
   echo $$ > "$LOCK_DIR/pid"
@@ -912,7 +1123,7 @@ else
   if [ -f "$LOCK_DIR/pid" ]; then
     OLD_PID=$(cat "$LOCK_DIR/pid" 2>/dev/null || echo "")
     if [ -n "$OLD_PID" ] && ! kill -0 "$OLD_PID" 2>/dev/null; then
-      rm -rf "$LOCK_DIR"
+      release_lock_dir
       if mkdir "$LOCK_DIR" 2>/dev/null; then
         LOCKED=1
         echo $$ > "$LOCK_DIR/pid"
@@ -931,16 +1142,26 @@ fi
 
 TMP=$(mktemp -d)
 cleanup() {
-  rm -rf "$TMP"
-  if [ "$LOCKED" -eq 1 ]; then rm -rf "$LOCK_DIR"; fi
+  rm -rf "$TMP" 2>/dev/null || true
+  if [ "$LOCKED" -eq 1 ]; then
+    release_lock_dir
+  fi
 }
 trap cleanup EXIT
+
+# Check if already at target version.
+# Keep post-install steps idempotent so installer still refreshes local setup.
+if [ "$FORCE_INSTALL" -eq 0 ] && check_installed_version "$VERSION"; then
+  ok "casr $VERSION is already installed at $DEST/$BINARY_NAME"
+  info "Use --force to reinstall"
+  INSTALL_SOURCE="already installed ($VERSION)"
+fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Offline Install Path
 # ═══════════════════════════════════════════════════════════════════════════════
 
-INSTALL_SOURCE=""
+INSTALL_SOURCE="${INSTALL_SOURCE:-}"
 
 if [ -n "$OFFLINE_TARBALL" ]; then
   if [ ! -f "$OFFLINE_TARBALL" ]; then
@@ -1082,6 +1303,7 @@ fi
 
 maybe_add_path
 maybe_install_completions
+configure_agents
 
 if [ "$VERIFY" -eq 1 ]; then
   run_self_test
@@ -1111,6 +1333,30 @@ else
   PROV_LIST="none detected"
 fi
 
+summary_lines=(
+  "Binary:           $DEST/$BINARY_NAME"
+  "Version:          $VERSION"
+  "Install source:   $INSTALL_SOURCE"
+  "Providers:        $PROV_LIST"
+  "Skill archive:    $SKILL_ARCHIVE_STATUS"
+  "Claude skill:     $CLAUDE_SKILL_STATUS"
+  "Codex skill:      $CODEX_SKILL_STATUS"
+  "Wrapper cc:       $CC_WRAPPER_STATUS"
+  "Wrapper cod:      $COD_WRAPPER_STATUS"
+  "Wrapper gmi:      $GMI_WRAPPER_STATUS"
+  ""
+  "Get started:"
+  "  casr providers"
+  "  casr list"
+  "  casr -cc <session-id>"
+  "  casr -cod <session-id>"
+  "  casr -gmi <session-id>"
+  ""
+  "Uninstall/revert:"
+  "  rm -f $DEST/$BINARY_NAME $DEST/cc $DEST/cod $DEST/gmi"
+  "  rm -rf \$HOME/.claude/skills/casr \$HOME/.codex/skills/casr"
+)
+
 echo ""
 
 if [ "$QUIET" -eq 0 ]; then
@@ -1118,32 +1364,25 @@ if [ "$QUIET" -eq 0 ]; then
     {
       gum style --foreground 42 --bold 'casr installed successfully!'
       echo ""
-      gum style --foreground 245 "Binary:    $DEST/$BINARY_NAME"
-      gum style --foreground 245 "Version:   $VERSION"
-      gum style --foreground 245 "Source:    $INSTALL_SOURCE"
-      gum style --foreground 245 "Providers: $PROV_LIST"
-      echo ""
-      gum style --foreground 245 'Get started:'
-      gum style --foreground 39 '  casr providers          # see detected providers'
-      gum style --foreground 39 '  casr list               # find sessions'
-      gum style --foreground 39 '  casr cc resume <id>     # convert a session'
-      echo ""
-      gum style --foreground 245 --italic "To uninstall: rm $DEST/$BINARY_NAME"
+      for line in "${summary_lines[@]}"; do
+        if [ -z "$line" ]; then
+          echo ""
+          continue
+        fi
+        if [[ "$line" == "Get started:" ]] || [[ "$line" == "Uninstall/revert:" ]]; then
+          gum style --foreground 245 "$line"
+        elif [[ "$line" == "  casr "* ]] || [[ "$line" == "  rm "* ]]; then
+          gum style --foreground 39 "$line"
+        else
+          gum style --foreground 245 "$line"
+        fi
+      done
     } | gum style --border normal --border-foreground 42 --padding "1 2"
   else
-    draw_box "0;32" \
-      "\033[1;32mcasr installed successfully!\033[0m" \
-      "" \
-      "Binary:    $DEST/$BINARY_NAME" \
-      "Version:   $VERSION" \
-      "Source:    $INSTALL_SOURCE" \
-      "Providers: $PROV_LIST" \
-      "" \
-      "Get started:" \
-      "  \033[0;36mcasr providers\033[0m          # see detected providers" \
-      "  \033[0;36mcasr list\033[0m               # find sessions" \
-      "  \033[0;36mcasr cc resume <id>\033[0m     # convert a session" \
-      "" \
-      "\033[0;90mTo uninstall: rm $DEST/$BINARY_NAME\033[0m"
+    box_lines=("\033[1;32mcasr installed successfully!\033[0m" "")
+    for line in "${summary_lines[@]}"; do
+      box_lines+=("$line")
+    done
+    draw_box "0;32" "${box_lines[@]}"
   fi
 fi
