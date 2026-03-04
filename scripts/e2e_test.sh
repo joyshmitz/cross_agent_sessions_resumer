@@ -551,7 +551,7 @@ log "TEST: List --limit"
 setup_cc_fixture "cc_malformed" > /dev/null
 run_casr "list limit" --json list --limit 1
 assert_exit_ok "casr list --limit 1 succeeds"
-local_count=$(echo "$LAST_STDOUT" | jq 'length')
+local_count=$(echo "$LAST_STDOUT" | jq 'if type=="array" then length else (.items // [] | length) end')
 if [[ "$local_count" -eq 1 ]]; then
     pass "list --limit 1 returns 1 session"
 else
