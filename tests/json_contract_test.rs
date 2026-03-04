@@ -356,6 +356,13 @@ fn assert_list_item(obj: &serde_json::Value, idx: usize) {
             "workspace",
             "started_at",
             "path",
+            "avg_agent_response_chars",
+            "avg_agent_response_chars_rounded",
+            "file_size_bytes",
+            "file_size_kb",
+            "last_active_at",
+            "tool_uses",
+            "unique_user_messages",
         ],
         &ctx,
     );

@@ -239,7 +239,10 @@ mod cc_parity {
         // msg[2]: user with tool_result.
         assert_eq!(s.messages[2].role, MessageRole::User);
         assert_eq!(s.messages[2].tool_results.len(), 1);
-        assert_eq!(s.messages[2].tool_results[0].call_id.as_deref(), Some("tool-read-1"));
+        assert_eq!(
+            s.messages[2].tool_results[0].call_id.as_deref(),
+            Some("tool-read-1")
+        );
 
         // msg[3]: assistant with Edit tool_use.
         assert_eq!(s.messages[3].role, MessageRole::Assistant);
@@ -250,7 +253,10 @@ mod cc_parity {
         // msg[4]: user with tool_result.
         assert_eq!(s.messages[4].role, MessageRole::User);
         assert_eq!(s.messages[4].tool_results.len(), 1);
-        assert_eq!(s.messages[4].tool_results[0].call_id.as_deref(), Some("tool-edit-1"));
+        assert_eq!(
+            s.messages[4].tool_results[0].call_id.as_deref(),
+            Some("tool-edit-1")
+        );
 
         // msg[5]: final assistant text.
         assert_eq!(s.messages[5].role, MessageRole::Assistant);

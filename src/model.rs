@@ -197,7 +197,13 @@ pub fn parse_timestamp(value: &serde_json::Value) -> Option<i64> {
             if let Some(i) = n.as_i64() {
                 Some(if i < MILLIS_THRESHOLD { i * 1000 } else { i })
             } else {
-                n.as_f64().map(|f| if f < (MILLIS_THRESHOLD as f64) { (f * 1000.0) as i64 } else { f as i64 })
+                n.as_f64().map(|f| {
+                    if f < (MILLIS_THRESHOLD as f64) {
+                        (f * 1000.0) as i64
+                    } else {
+                        f as i64
+                    }
+                })
             }
         }
         serde_json::Value::String(s) => {
@@ -213,7 +219,11 @@ pub fn parse_timestamp(value: &serde_json::Value) -> Option<i64> {
             if let Ok(f) = s.parse::<f64>()
                 && f.is_finite()
             {
-                return Some(if f < (MILLIS_THRESHOLD as f64) { (f * 1000.0) as i64 } else { f as i64 });
+                return Some(if f < (MILLIS_THRESHOLD as f64) {
+                    (f * 1000.0) as i64
+                } else {
+                    f as i64
+                });
             }
             // Try RFC 3339 / ISO-8601 with timezone.
             if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
