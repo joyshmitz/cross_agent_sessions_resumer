@@ -69,7 +69,11 @@ fn is_valid_git_file_marker(path: &Path) -> bool {
     if std::io::BufRead::read_line(&mut reader, &mut first_line).is_err() {
         return false;
     }
-    first_line.trim_start().starts_with("gitdir:")
+    let marker_line = first_line.trim_start();
+    let Some(rest) = marker_line.strip_prefix("gitdir:") else {
+        return false;
+    };
+    !rest.trim().is_empty()
 }
 
 /// Best-effort git repository root for a workspace path.
@@ -711,6 +715,20 @@ mod tests {
         fs::create_dir_all(&workspace).expect("create workspace");
         fs::write(repo_root.join(".git"), "this is not a gitdir marker")
             .expect("write fake marker");
+
+        assert_eq!(
+            git_repo_root_from_workspace(Some(workspace.as_path())),
+            None
+        );
+    }
+
+    #[test]
+    fn git_repo_root_from_workspace_rejects_empty_gitdir_path() {
+        let tmp = TempDir::new().expect("temp dir");
+        let repo_root = tmp.path().join("bad-gitdir-marker");
+        let workspace = repo_root.join("src");
+        fs::create_dir_all(&workspace).expect("create workspace");
+        fs::write(repo_root.join(".git"), "gitdir:   ").expect("write invalid gitdir marker");
 
         assert_eq!(
             git_repo_root_from_workspace(Some(workspace.as_path())),
