@@ -395,6 +395,7 @@ fn cmd_list(
         title: Option<String>,
         workspace_name: Option<String>,
         workspace_name_source: Option<&'static str>,
+        repo_name: Option<String>,
         messages: usize,
         workspace: Option<PathBuf>,
         started_at: Option<i64>,
@@ -451,6 +452,7 @@ fn cmd_list(
                 "title": self.title,
                 "workspace_name": self.workspace_name,
                 "workspace_name_source": self.workspace_name_source,
+                "repo_name": self.repo_name,
                 "messages": self.messages,
                 "workspace": self.workspace.as_ref().map(|w| w.display().to_string()),
                 "started_at": self.started_at,
@@ -827,6 +829,7 @@ fn cmd_list(
             session_metrics(provider_slug, &session, &path);
         let (workspace_name, workspace_name_source) =
             casr::model::workspace_name_and_source_from_workspace(session.workspace.as_deref());
+        let repo_name = casr::model::repo_name_from_workspace(session.workspace.as_deref());
 
         SessionSummary {
             session_id: session.session_id,
@@ -834,6 +837,7 @@ fn cmd_list(
             title: session.title,
             workspace_name,
             workspace_name_source,
+            repo_name,
             messages: session.messages.len(),
             workspace: session.workspace,
             started_at: session.started_at,
@@ -1236,6 +1240,7 @@ fn cmd_list(
                 .with_column(Column::new("#").justify(JustifyMethod::Right).width(3))
                 .with_column(Column::new("Session ID").min_width(36))
                 .with_column(Column::new("Workspace").min_width(16))
+                .with_column(Column::new("Repo").min_width(16))
                 .with_column(Column::new("Msgs").justify(JustifyMethod::Right).width(6))
                 .with_column(
                     Column::new("Size KB")
@@ -1272,6 +1277,7 @@ fn cmd_list(
                 let rank = (idx + 1).to_string();
                 let session_id = s.session_id.as_str();
                 let workspace_name = s.workspace_name.as_deref().unwrap_or("-");
+                let repo_name = s.repo_name.as_deref().unwrap_or("-");
                 let messages = s.messages.to_string();
                 let messages_cell_style = message_count_style(s.messages);
                 let size_kb = s.file_size_display();
@@ -1285,6 +1291,7 @@ fn cmd_list(
                     Cell::new(rank.as_str()),
                     Cell::new(session_id),
                     Cell::new(workspace_name),
+                    Cell::new(repo_name),
                     Cell::new(messages.as_str()).style(messages_cell_style),
                     Cell::new(size_kb.as_str()),
                     Cell::new(unique_users.as_str()),
@@ -1309,6 +1316,7 @@ fn cmd_info(session_id: &str, json_mode: bool) -> anyhow::Result<()> {
     let session = resolved.provider.read_session(&resolved.path)?;
     let (workspace_name, workspace_name_source) =
         casr::model::workspace_name_and_source_from_workspace(session.workspace.as_deref());
+    let repo_name = casr::model::repo_name_from_workspace(session.workspace.as_deref());
 
     if json_mode {
         let json = serde_json::json!({
@@ -1317,6 +1325,7 @@ fn cmd_info(session_id: &str, json_mode: bool) -> anyhow::Result<()> {
             "title": session.title,
             "workspace_name": workspace_name,
             "workspace_name_source": workspace_name_source,
+            "repo_name": repo_name,
             "workspace": session.workspace.as_ref().map(|w| w.display().to_string()),
             "messages": session.messages.len(),
             "started_at": session.started_at,
@@ -1341,6 +1350,9 @@ fn cmd_info(session_id: &str, json_mode: bool) -> anyhow::Result<()> {
         }
         if let Some(source) = workspace_name_source {
             println!("  {} {source}", "Workspace Name Source:".dimmed());
+        }
+        if let Some(ref repo_name) = repo_name {
+            println!("  {} {repo_name}", "Repository Name:".dimmed());
         }
         println!("  {} {}", "Messages:".dimmed(), session.messages.len());
         if let Some(ref model) = session.model_name {

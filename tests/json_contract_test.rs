@@ -342,7 +342,7 @@ fn contract_providers_aliases_match_slugs() {
 // ---------------------------------------------------------------------------
 // Contract: `list --json`
 // ---------------------------------------------------------------------------
-// Expected shape: Array of {session_id, provider, title, workspace_name, workspace_name_source, messages, workspace, started_at, path}
+// Expected shape: Array of {session_id, provider, title, workspace_name, workspace_name_source, repo_name, messages, workspace, started_at, path}
 
 fn assert_list_item(obj: &serde_json::Value, idx: usize) {
     let ctx = format!("list[{idx}]");
@@ -354,6 +354,7 @@ fn assert_list_item(obj: &serde_json::Value, idx: usize) {
             "title",
             "workspace_name",
             "workspace_name_source",
+            "repo_name",
             "messages",
             "workspace",
             "started_at",
@@ -373,6 +374,7 @@ fn assert_list_item(obj: &serde_json::Value, idx: usize) {
     assert_string_or_null(&obj["title"], "title", &ctx);
     assert_string_or_null(&obj["workspace_name"], "workspace_name", &ctx);
     assert_string_or_null(&obj["workspace_name_source"], "workspace_name_source", &ctx);
+    assert_string_or_null(&obj["repo_name"], "repo_name", &ctx);
     assert_uint(&obj["messages"], "messages", &ctx);
     assert_string_or_null(&obj["workspace"], "workspace", &ctx);
     assert_number_or_null(&obj["started_at"], "started_at", &ctx);
@@ -506,7 +508,7 @@ fn contract_list_json_messages_is_nonnegative() {
 // ---------------------------------------------------------------------------
 // Contract: `info --json`
 // ---------------------------------------------------------------------------
-// Expected shape: {session_id, provider, title, workspace_name, workspace_name_source, workspace, messages, started_at,
+// Expected shape: {session_id, provider, title, workspace_name, workspace_name_source, repo_name, workspace, messages, started_at,
 //                  ended_at, model_name, source_path, metadata}
 
 fn assert_info_object(obj: &serde_json::Value) {
@@ -519,6 +521,7 @@ fn assert_info_object(obj: &serde_json::Value) {
             "title",
             "workspace_name",
             "workspace_name_source",
+            "repo_name",
             "workspace",
             "messages",
             "started_at",
@@ -534,6 +537,7 @@ fn assert_info_object(obj: &serde_json::Value) {
     assert_string_or_null(&obj["title"], "title", ctx);
     assert_string_or_null(&obj["workspace_name"], "workspace_name", ctx);
     assert_string_or_null(&obj["workspace_name_source"], "workspace_name_source", ctx);
+    assert_string_or_null(&obj["repo_name"], "repo_name", ctx);
     assert_string_or_null(&obj["workspace"], "workspace", ctx);
     assert_uint(&obj["messages"], "messages", ctx);
     assert_number_or_null(&obj["started_at"], "started_at", ctx);

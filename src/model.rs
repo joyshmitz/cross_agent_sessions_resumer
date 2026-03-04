@@ -202,6 +202,28 @@ pub fn workspace_name_and_source_from_workspace(
     (workspace_name, source)
 }
 
+/// Best-effort git repository root for a workspace path.
+pub fn git_repo_root_from_workspace(workspace: Option<&Path>) -> Option<PathBuf> {
+    let workspace = workspace?;
+    for ancestor in workspace.ancestors() {
+        let git_marker = ancestor.join(".git");
+        if git_marker.is_dir() || git_marker.is_file() {
+            return Some(ancestor.to_path_buf());
+        }
+    }
+    None
+}
+
+/// Derive repository name from git root (if available).
+pub fn repo_name_from_workspace(workspace: Option<&Path>) -> Option<String> {
+    git_repo_root_from_workspace(workspace)
+        .and_then(|root| {
+            root.file_name()
+                .map(|name| name.to_string_lossy().to_string())
+        })
+        .filter(|name| !name.is_empty())
+}
+
 /// Parse a timestamp value into epoch milliseconds.
 ///
 /// Accepts:
@@ -318,6 +340,8 @@ pub fn normalize_role(role_str: &str) -> MessageRole {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::fs;
+    use tempfile::TempDir;
 
     // -----------------------------------------------------------------------
     // flatten_content
@@ -451,6 +475,54 @@ mod tests {
         let (name, source) = workspace_name_and_source_from_workspace(None);
         assert_eq!(name, None);
         assert_eq!(source, None);
+    }
+
+    #[test]
+    fn git_repo_root_from_workspace_finds_repo_ancestor() {
+        let tmp = TempDir::new().expect("temp dir");
+        let repo_root = tmp.path().join("my-repo");
+        let nested_workspace = repo_root.join("apps").join("backend");
+        fs::create_dir_all(repo_root.join(".git")).expect("create .git dir");
+        fs::create_dir_all(&nested_workspace).expect("create nested workspace");
+
+        let detected =
+            git_repo_root_from_workspace(Some(nested_workspace.as_path())).expect("repo root");
+        assert_eq!(detected, repo_root);
+    }
+
+    #[test]
+    fn git_repo_root_from_workspace_supports_git_file_marker() {
+        let tmp = TempDir::new().expect("temp dir");
+        let repo_root = tmp.path().join("worktree-repo");
+        let workspace = repo_root.join("src");
+        fs::create_dir_all(&workspace).expect("create workspace");
+        fs::write(repo_root.join(".git"), "gitdir: /tmp/fake").expect("write git file marker");
+
+        let detected = git_repo_root_from_workspace(Some(workspace.as_path())).expect("repo root");
+        assert_eq!(detected, repo_root);
+    }
+
+    #[test]
+    fn repo_name_from_workspace_returns_none_without_git_marker() {
+        let tmp = TempDir::new().expect("temp dir");
+        let workspace = tmp.path().join("not-a-repo");
+        fs::create_dir_all(&workspace).expect("create workspace");
+
+        assert_eq!(repo_name_from_workspace(Some(workspace.as_path())), None);
+    }
+
+    #[test]
+    fn repo_name_from_workspace_returns_git_root_basename() {
+        let tmp = TempDir::new().expect("temp dir");
+        let repo_root = tmp.path().join("session-resumer");
+        let workspace = repo_root.join("tools").join("casr");
+        fs::create_dir_all(repo_root.join(".git")).expect("create .git dir");
+        fs::create_dir_all(&workspace).expect("create workspace");
+
+        assert_eq!(
+            repo_name_from_workspace(Some(workspace.as_path())),
+            Some("session-resumer".to_string())
+        );
     }
 
     // -----------------------------------------------------------------------
