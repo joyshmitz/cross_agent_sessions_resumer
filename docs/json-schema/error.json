@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://casr.dev/schema/error.json",
+  "title": "casr --json error envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "ok", "error_type", "message"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "ok": {"type": "boolean", "const": false},
+    "error_type": {"type": "string"},
+    "message": {"type": "string"}
+  }
+}

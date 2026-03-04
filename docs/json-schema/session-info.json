@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://casr.dev/schema/session-info.json",
+  "title": "casr info --json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "session_id",
+    "provider",
+    "title",
+    "workspace_name",
+    "workspace_name_source",
+    "repo_name",
+    "workspace",
+    "messages",
+    "started_at",
+    "ended_at",
+    "model_name",
+    "source_path",
+    "metadata"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "session_id": {"type": "string"},
+    "provider": {"type": "string"},
+    "title": {"type": ["string", "null"]},
+    "workspace_name": {"type": ["string", "null"]},
+    "workspace_name_source": {"type": ["string", "null"]},
+    "repo_name": {"type": ["string", "null"]},
+    "workspace": {"type": ["string", "null"]},
+    "messages": {"type": "integer", "minimum": 0},
+    "started_at": {"type": ["integer", "null"]},
+    "ended_at": {"type": ["integer", "null"]},
+    "model_name": {"type": ["string", "null"]},
+    "source_path": {"type": "string"},
+    "metadata": {"type": ["object", "null"]}
+  }
+}

@@ -205,7 +205,7 @@ Global flags:
 ```bash
 --dry-run                 # Show what would happen without writing
 --force                   # Overwrite existing target session (creates .bak backup)
---json                    # Structured JSON output
+--json                    # Structured JSON output (includes schema_version)
 --verbose                 # Debug-level logging (casr=debug)
 --trace                   # Trace-level logging (casr=trace)
 --source <alias_or_path>  # Explicit source provider alias or direct session path
@@ -236,6 +236,7 @@ casr list
 casr list --provider codex
 casr list --workspace /data/projects/myapp
 casr list --limit 100 --sort messages
+casr list --json --workspace /data/projects/myapp --enrich-fs  # opt-in host FS enrichment (repo_name)
 
 # default behavior (no args): current workspace only, top 10, styled table output
 casr list
@@ -248,6 +249,7 @@ Show non-converting session details.
 ```bash
 casr info 019c3eae-94c3-7d73-9b2a-9edb18f1563b
 casr info 019c3eae-94c3-7d73-9b2a-9edb18f1563b --json
+casr info 019c3eae-94c3-7d73-9b2a-9edb18f1563b --json --enrich-fs
 ```
 
 ### `casr providers`
@@ -485,6 +487,7 @@ The `list` command is optimized for project-local triage first.
 
 - Default scope is the current working directory project.
 - `--workspace` can override scope explicitly.
+- `--enrich-fs` opt-in enables host filesystem enrichment (for example `repo_name` from a local `.git` ancestor).
 - Provider-specific path hints are used for fast filtering (`claude-code`, `gemini`).
 - Providers that support `list_sessions()` can bypass expensive filesystem walks.
 - Fallback directory scans are capped by depth and extension filters.
@@ -495,6 +498,10 @@ When sorting by date, probe size is capped to avoid slow scans:
 - Global mode uses `max(limit * 8, 30)`.
 
 `Last Active` is computed from canonical conversation activity and file modification time, then rendered as relative age.
+
+JSON note:
+- All `--json` command outputs include a top-level or per-record `schema_version` field.
+- `list`/`info` default to session-intrinsic data only; host-dependent enrichment is opt-in via `--enrich-fs`.
 
 ## Performance and Scaling Notes
 
@@ -695,6 +702,13 @@ By default it stops with a conflict error. With `--force`, it creates a `.bak` b
 ### Can I script casr in CI or automation?
 
 Yes. Use `--json` output and non-interactive command patterns.
+
+JSON schemas for automation are available in `docs/json-schema/`:
+- `conversion-result.json`
+- `session-list.json`
+- `session-info.json`
+- `providers.json`
+- `error.json`
 
 ### How do I debug a failed conversion?
 

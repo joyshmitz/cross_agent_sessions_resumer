@@ -488,7 +488,7 @@ cross_agent_session_resumer/
 This tool has two output modes:
 
 - **Human-readable CLI output:** Colorized progress, warnings, and next-step resume command
-- **JSON output (`--json`):** Structured machine-readable output for automation
+- **JSON output (`--json`):** Structured machine-readable output for automation (includes `schema_version`)
 
 Output behavior:
 - **Success:** Summary of source provider, conversion result, and exact resume command
@@ -561,8 +561,8 @@ casr <target> resume <session-id> [--source <alias_or_path>] [--dry-run] [--forc
 Additional command shapes:
 
 ```bash
-casr list [--provider <slug>] [--workspace <path>] [--limit <n>] [--sort <field>] [--json]
-casr info <session-id> [--json]
+casr list [--provider <slug>] [--workspace <path>] [--limit <n>] [--sort <field>] [--json] [--enrich-fs]
+casr info <session-id> [--json] [--enrich-fs]
 casr providers [--json]
 casr completions <bash|zsh|fish>
 ```
@@ -573,6 +573,7 @@ Successful conversion (representative shape):
 
 ```json
 {
+  "schema_version": 1,
   "ok": true,
   "source_provider": "codex",
   "target_provider": "claude-code",
@@ -590,6 +591,7 @@ Error (representative shape):
 
 ```json
 {
+  "schema_version": 1,
   "ok": false,
   "error_type": "SessionNotFound",
   "message": "Session abc123 not found. Run 'casr list' to discover available sessions.",

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://casr.dev/schema/conversion-result.json",
+  "title": "casr resume --json success",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "ok",
+    "source_provider",
+    "target_provider",
+    "source_session_id",
+    "target_session_id",
+    "written_paths",
+    "resume_command",
+    "dry_run",
+    "warnings"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "ok": {"type": "boolean", "const": true},
+    "source_provider": {"type": "string"},
+    "target_provider": {"type": "string"},
+    "source_session_id": {"type": "string"},
+    "target_session_id": {"type": ["string", "null"]},
+    "written_paths": {
+      "anyOf": [
+        {"type": "null"},
+        {"type": "array", "items": {"type": "string"}}
+      ]
+    },
+    "resume_command": {"type": ["string", "null"]},
+    "dry_run": {"type": "boolean"},
+    "warnings": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  }
+}
