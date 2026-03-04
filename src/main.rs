@@ -14,12 +14,92 @@ use clap::Parser;
 use colored::Colorize;
 use rayon::prelude::*;
 use rich_rust::prelude::{Cell, Column, Console, JustifyMethod, Row, Style, Table};
+use serde::Serialize;
 use tracing_subscriber::EnvFilter;
 
 use casr::discovery::ProviderRegistry;
 use casr::pipeline::{ConversionPipeline, ConvertOptions};
 
 const JSON_SCHEMA_VERSION: u32 = 2;
+
+#[derive(Serialize)]
+struct JsonErrorOutput {
+    schema_version: u32,
+    ok: bool,
+    error_type: String,
+    message: String,
+}
+
+#[derive(Serialize)]
+struct JsonResumeOutput {
+    schema_version: u32,
+    ok: bool,
+    source_provider: String,
+    target_provider: String,
+    source_session_id: String,
+    target_session_id: Option<String>,
+    written_paths: Option<Vec<String>>,
+    resume_command: Option<String>,
+    dry_run: bool,
+    warnings: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct JsonListOutput {
+    schema_version: u32,
+    items: Vec<JsonListItem>,
+}
+
+#[derive(Serialize)]
+struct JsonListItem {
+    schema_version: u32,
+    session_id: String,
+    provider: String,
+    title: Option<String>,
+    workspace_name: Option<String>,
+    workspace_name_source: Option<String>,
+    repo_name: Option<String>,
+    messages: usize,
+    workspace: Option<String>,
+    started_at: Option<i64>,
+    last_active_at: Option<i64>,
+    file_size_bytes: u64,
+    file_size_kb: u64,
+    unique_user_messages: usize,
+    avg_agent_response_chars: f64,
+    avg_agent_response_chars_rounded: u64,
+    tool_uses: usize,
+    path: String,
+}
+
+#[derive(Serialize)]
+struct JsonInfoOutput {
+    schema_version: u32,
+    session_id: String,
+    provider: String,
+    title: Option<String>,
+    workspace_name: Option<String>,
+    workspace_name_source: Option<String>,
+    repo_name: Option<String>,
+    workspace: Option<String>,
+    messages: usize,
+    started_at: Option<i64>,
+    ended_at: Option<i64>,
+    model_name: Option<String>,
+    source_path: String,
+    metadata: serde_json::Value,
+}
+
+#[derive(Serialize)]
+struct JsonProviderOutput {
+    schema_version: u32,
+    name: String,
+    slug: String,
+    alias: String,
+    installed: bool,
+    version: Option<String>,
+    evidence: Vec<String>,
+}
 
 /// Cross Agent Session Resumer — resume AI coding sessions across providers.
 ///
@@ -264,12 +344,12 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             if cli.json {
-                let json = serde_json::json!({
-                    "schema_version": JSON_SCHEMA_VERSION,
-                    "ok": false,
-                    "error_type": error_type_name(&e),
-                    "message": format!("{e}"),
-                });
+                let json = JsonErrorOutput {
+                    schema_version: JSON_SCHEMA_VERSION,
+                    ok: false,
+                    error_type: error_type_name(&e).to_string(),
+                    message: format!("{e}"),
+                };
                 eprintln!(
                     "{}",
                     serde_json::to_string_pretty(&json).unwrap_or_default()
@@ -328,18 +408,23 @@ fn cmd_resume(
     let result = pipeline.convert(target, session_id, opts)?;
 
     if json_mode {
-        let json = serde_json::json!({
-            "schema_version": JSON_SCHEMA_VERSION,
-            "ok": true,
-            "source_provider": result.source_provider,
-            "target_provider": result.target_provider,
-            "source_session_id": result.canonical_session.session_id,
-            "target_session_id": result.written.as_ref().map(|w| &w.session_id),
-            "written_paths": result.written.as_ref().map(|w| &w.paths),
-            "resume_command": result.written.as_ref().map(|w| &w.resume_command),
-            "dry_run": result.written.is_none(),
-            "warnings": result.warnings,
-        });
+        let json = JsonResumeOutput {
+            schema_version: JSON_SCHEMA_VERSION,
+            ok: true,
+            source_provider: result.source_provider.clone(),
+            target_provider: result.target_provider.clone(),
+            source_session_id: result.canonical_session.session_id.clone(),
+            target_session_id: result.written.as_ref().map(|w| w.session_id.clone()),
+            written_paths: result.written.as_ref().map(|w| {
+                w.paths
+                    .iter()
+                    .map(|path| path.display().to_string())
+                    .collect()
+            }),
+            resume_command: result.written.as_ref().map(|w| w.resume_command.clone()),
+            dry_run: result.written.is_none(),
+            warnings: result.warnings.clone(),
+        };
         println!("{}", serde_json::to_string_pretty(&json)?);
     } else if let Some(ref written) = result.written {
         println!(
@@ -463,27 +548,27 @@ fn cmd_list(
                 .unwrap_or_else(|| "-".to_string())
         }
 
-        fn to_json(&self) -> serde_json::Value {
-            serde_json::json!({
-                "schema_version": JSON_SCHEMA_VERSION,
-                "session_id": self.session_id,
-                "provider": self.provider,
-                "title": self.title,
-                "workspace_name": self.workspace_name,
-                "workspace_name_source": self.workspace_name_source,
-                "repo_name": self.repo_name,
-                "messages": self.messages,
-                "workspace": self.workspace.as_ref().map(|w| w.display().to_string()),
-                "started_at": self.started_at,
-                "last_active_at": self.last_active_at,
-                "file_size_bytes": self.file_size_bytes,
-                "file_size_kb": self.file_size_kb_rounded(),
-                "unique_user_messages": self.unique_user_messages,
-                "avg_agent_response_chars": self.avg_agent_response_chars,
-                "avg_agent_response_chars_rounded": self.avg_agent_chars_rounded(),
-                "tool_uses": self.tool_uses,
-                "path": self.path.display().to_string(),
-            })
+        fn to_json_item(&self) -> JsonListItem {
+            JsonListItem {
+                schema_version: JSON_SCHEMA_VERSION,
+                session_id: self.session_id.clone(),
+                provider: self.provider.clone(),
+                title: self.title.clone(),
+                workspace_name: self.workspace_name.clone(),
+                workspace_name_source: self.workspace_name_source.map(str::to_string),
+                repo_name: self.repo_name.clone(),
+                messages: self.messages,
+                workspace: self.workspace.as_ref().map(|w| w.display().to_string()),
+                started_at: self.started_at,
+                last_active_at: self.last_active_at,
+                file_size_bytes: self.file_size_bytes,
+                file_size_kb: self.file_size_kb_rounded(),
+                unique_user_messages: self.unique_user_messages,
+                avg_agent_response_chars: self.avg_agent_response_chars,
+                avg_agent_response_chars_rounded: self.avg_agent_chars_rounded(),
+                tool_uses: self.tool_uses,
+                path: self.path.display().to_string(),
+            }
         }
     }
 
@@ -1212,16 +1297,16 @@ fn cmd_list(
     );
 
     if json_mode {
-        let mut items: Vec<serde_json::Value> = Vec::new();
+        let mut items: Vec<JsonListItem> = Vec::new();
         for sessions in sessions_by_provider.values() {
             for session in sessions {
-                items.push(session.to_json());
+                items.push(session.to_json_item());
             }
         }
-        let json = serde_json::json!({
-            "schema_version": JSON_SCHEMA_VERSION,
-            "items": items,
-        });
+        let json = JsonListOutput {
+            schema_version: JSON_SCHEMA_VERSION,
+            items,
+        };
         println!("{}", serde_json::to_string_pretty(&json)?);
     } else {
         if non_empty_group_count == 0 {
@@ -1355,22 +1440,22 @@ fn cmd_info(session_id: &str, json_mode: bool, enrich_fs: bool) -> anyhow::Resul
     };
 
     if json_mode {
-        let json = serde_json::json!({
-            "schema_version": JSON_SCHEMA_VERSION,
-            "session_id": session.session_id,
-            "provider": session.provider_slug,
-            "title": session.title,
-            "workspace_name": workspace_name,
-            "workspace_name_source": workspace_name_source,
-            "repo_name": repo_name,
-            "workspace": session.workspace.as_ref().map(|w| w.display().to_string()),
-            "messages": session.messages.len(),
-            "started_at": session.started_at,
-            "ended_at": session.ended_at,
-            "model_name": session.model_name,
-            "source_path": session.source_path.display().to_string(),
-            "metadata": session.metadata,
-        });
+        let json = JsonInfoOutput {
+            schema_version: JSON_SCHEMA_VERSION,
+            session_id: session.session_id.clone(),
+            provider: session.provider_slug.clone(),
+            title: session.title.clone(),
+            workspace_name,
+            workspace_name_source: workspace_name_source.map(str::to_string),
+            repo_name,
+            workspace: session.workspace.as_ref().map(|w| w.display().to_string()),
+            messages: session.messages.len(),
+            started_at: session.started_at,
+            ended_at: session.ended_at,
+            model_name: session.model_name.clone(),
+            source_path: session.source_path.display().to_string(),
+            metadata: session.metadata.clone(),
+        };
         println!("{}", serde_json::to_string_pretty(&json)?);
     } else {
         println!("{}\n", "Session Info".bold());
@@ -1422,18 +1507,16 @@ fn cmd_providers(json_mode: bool) -> anyhow::Result<()> {
     let results = registry.detect_all();
 
     if json_mode {
-        let providers: Vec<serde_json::Value> = results
+        let providers: Vec<JsonProviderOutput> = results
             .iter()
-            .map(|(p, det)| {
-                serde_json::json!({
-                    "schema_version": JSON_SCHEMA_VERSION,
-                    "name": p.name(),
-                    "slug": p.slug(),
-                    "alias": p.cli_alias(),
-                    "installed": det.installed,
-                    "version": det.version,
-                    "evidence": det.evidence,
-                })
+            .map(|(p, det)| JsonProviderOutput {
+                schema_version: JSON_SCHEMA_VERSION,
+                name: p.name().to_string(),
+                slug: p.slug().to_string(),
+                alias: p.cli_alias().to_string(),
+                installed: det.installed,
+                version: det.version.clone(),
+                evidence: det.evidence.clone(),
             })
             .collect();
         println!("{}", serde_json::to_string_pretty(&providers)?);
