@@ -46,7 +46,7 @@ fn casr_cmd(tmp: &TempDir) -> Command {
     cmd
 }
 
-fn list_items<'a>(parsed: &'a serde_json::Value) -> &'a [serde_json::Value] {
+fn list_items(parsed: &serde_json::Value) -> &[serde_json::Value] {
     parsed
         .get("items")
         .and_then(|v| v.as_array())
@@ -389,7 +389,10 @@ fn cli_list_human_enrich_fs_keeps_repo_in_repo_column() {
     assert!(output.status.success());
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("Repo"), "list table should include Repo column");
+    assert!(
+        stdout.contains("Repo"),
+        "list table should include Repo column"
+    );
 
     let row_line = stdout
         .lines()
@@ -405,9 +408,15 @@ fn cli_list_human_enrich_fs_keeps_repo_in_repo_column() {
         cells.len() >= 11,
         "expected row to include repo column cells, got: {cells:?}"
     );
-    assert_eq!(cells[2], "backend", "workspace should remain in workspace column");
+    assert_eq!(
+        cells[2], "backend",
+        "workspace should remain in workspace column"
+    );
     assert_eq!(cells[3], "4", "message count should remain in Msgs column");
-    assert_eq!(cells[10], "repo-list-human", "repo should appear in Repo column");
+    assert_eq!(
+        cells[10], "repo-list-human",
+        "repo should appear in Repo column"
+    );
 }
 
 #[test]

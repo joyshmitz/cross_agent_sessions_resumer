@@ -712,7 +712,10 @@ mod tests {
         fs::write(repo_root.join(".git"), "this is not a gitdir marker")
             .expect("write fake marker");
 
-        assert_eq!(git_repo_root_from_workspace(Some(workspace.as_path())), None);
+        assert_eq!(
+            git_repo_root_from_workspace(Some(workspace.as_path())),
+            None
+        );
     }
 
     #[test]

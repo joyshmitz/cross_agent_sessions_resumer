@@ -365,7 +365,7 @@ fn contract_providers_aliases_match_slugs() {
 // ---------------------------------------------------------------------------
 // Expected shape: {schema_version, items: [{schema_version, session_id, provider, title, workspace_name, workspace_name_source, repo_name, messages, workspace, started_at, path}]}
 
-fn assert_list_envelope<'a>(obj: &'a serde_json::Value) -> &'a [serde_json::Value] {
+fn assert_list_envelope(obj: &serde_json::Value) -> &[serde_json::Value] {
     let ctx = "list";
     assert_exact_keys(obj, &["schema_version", "items"], ctx);
     assert_schema_version(obj, ctx);
