@@ -60,6 +60,44 @@ impl SourceHint {
     }
 }
 
+fn is_valid_git_file_marker(path: &Path) -> bool {
+    let Ok(file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut reader = std::io::BufReader::new(file);
+    let mut first_line = String::new();
+    if std::io::BufRead::read_line(&mut reader, &mut first_line).is_err() {
+        return false;
+    }
+    first_line.trim_start().starts_with("gitdir:")
+}
+
+/// Best-effort git repository root for a workspace path.
+///
+/// Accepts:
+/// - `.git/` directory markers
+/// - `.git` file markers that begin with `gitdir:`
+pub fn git_repo_root_from_workspace(workspace: Option<&Path>) -> Option<PathBuf> {
+    let workspace = workspace?;
+    for ancestor in workspace.ancestors() {
+        let git_marker = ancestor.join(".git");
+        if git_marker.is_dir() || (git_marker.is_file() && is_valid_git_file_marker(&git_marker)) {
+            return Some(ancestor.to_path_buf());
+        }
+    }
+    None
+}
+
+/// Derive repository name from git root (if available).
+pub fn repo_name_from_workspace(workspace: Option<&Path>) -> Option<String> {
+    git_repo_root_from_workspace(workspace)
+        .and_then(|root| {
+            root.file_name()
+                .map(|name| name.to_string_lossy().to_string())
+        })
+        .filter(|name| !name.is_empty())
+}
+
 // ---------------------------------------------------------------------------
 // Resolved session
 // ---------------------------------------------------------------------------
@@ -572,10 +610,15 @@ pub struct DetectionResult {
 
 #[cfg(test)]
 mod tests {
-    use super::{ProviderRegistry, SourceHint, is_plausible_session};
+    use super::{
+        ProviderRegistry, SourceHint, git_repo_root_from_workspace, is_plausible_session,
+        repo_name_from_workspace,
+    };
     use crate::model::{CanonicalMessage, CanonicalSession, MessageRole};
+    use std::fs;
     use std::io::Write as _;
     use std::path::PathBuf;
+    use tempfile::TempDir;
 
     fn msg(idx: usize, role: MessageRole) -> CanonicalMessage {
         CanonicalMessage {
@@ -633,6 +676,57 @@ mod tests {
             }
             other => panic!("expected Path, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn git_repo_root_from_workspace_finds_repo_ancestor() {
+        let tmp = TempDir::new().expect("temp dir");
+        let repo_root = tmp.path().join("my-repo");
+        let nested_workspace = repo_root.join("apps").join("backend");
+        fs::create_dir_all(repo_root.join(".git")).expect("create .git dir");
+        fs::create_dir_all(&nested_workspace).expect("create nested workspace");
+
+        let detected =
+            git_repo_root_from_workspace(Some(nested_workspace.as_path())).expect("repo root");
+        assert_eq!(detected, repo_root);
+    }
+
+    #[test]
+    fn git_repo_root_from_workspace_supports_valid_git_file_marker() {
+        let tmp = TempDir::new().expect("temp dir");
+        let repo_root = tmp.path().join("worktree-repo");
+        let workspace = repo_root.join("src");
+        fs::create_dir_all(&workspace).expect("create workspace");
+        fs::write(repo_root.join(".git"), "gitdir: /tmp/fake").expect("write git file marker");
+
+        let detected = git_repo_root_from_workspace(Some(workspace.as_path())).expect("repo root");
+        assert_eq!(detected, repo_root);
+    }
+
+    #[test]
+    fn git_repo_root_from_workspace_rejects_invalid_git_file_marker() {
+        let tmp = TempDir::new().expect("temp dir");
+        let repo_root = tmp.path().join("not-a-git-repo");
+        let workspace = repo_root.join("src");
+        fs::create_dir_all(&workspace).expect("create workspace");
+        fs::write(repo_root.join(".git"), "this is not a gitdir marker")
+            .expect("write fake marker");
+
+        assert_eq!(git_repo_root_from_workspace(Some(workspace.as_path())), None);
+    }
+
+    #[test]
+    fn repo_name_from_workspace_returns_git_root_basename() {
+        let tmp = TempDir::new().expect("temp dir");
+        let repo_root = tmp.path().join("session-resumer");
+        let workspace = repo_root.join("tools").join("casr");
+        fs::create_dir_all(repo_root.join(".git")).expect("create .git dir");
+        fs::create_dir_all(&workspace).expect("create workspace");
+
+        assert_eq!(
+            repo_name_from_workspace(Some(workspace.as_path())),
+            Some("session-resumer".to_string())
+        );
     }
 
     #[test]

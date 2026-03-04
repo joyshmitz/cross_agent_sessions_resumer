@@ -850,7 +850,7 @@ fn cmd_list(
         let (workspace_name, workspace_name_source) =
             casr::model::workspace_name_and_source_from_workspace(session.workspace.as_deref());
         let repo_name = if enrich_fs {
-            casr::model::repo_name_from_workspace(session.workspace.as_deref())
+            casr::discovery::repo_name_from_workspace(session.workspace.as_deref())
         } else {
             None
         };
@@ -1349,7 +1349,7 @@ fn cmd_info(session_id: &str, json_mode: bool, enrich_fs: bool) -> anyhow::Resul
     let (workspace_name, workspace_name_source) =
         casr::model::workspace_name_and_source_from_workspace(session.workspace.as_deref());
     let repo_name = if enrich_fs {
-        casr::model::repo_name_from_workspace(session.workspace.as_deref())
+        casr::discovery::repo_name_from_workspace(session.workspace.as_deref())
     } else {
         None
     };
