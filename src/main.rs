@@ -90,12 +90,20 @@ enum Command {
         /// Sort field (date, messages, provider).
         #[arg(long, default_value = "date")]
         sort: String,
+
+        /// Enrich output with host filesystem probes (for example git repo name).
+        #[arg(long)]
+        enrich_fs: bool,
     },
 
     /// Show details for a specific session.
     Info {
         /// Session ID to inspect.
         session_id: String,
+
+        /// Enrich output with host filesystem probes (for example git repo name).
+        #[arg(long)]
+        enrich_fs: bool,
     },
 
     /// List detected providers and their installation status.
@@ -233,14 +241,19 @@ fn main() -> ExitCode {
             workspace,
             limit,
             sort,
+            enrich_fs,
         } => cmd_list(
             provider.as_deref(),
             workspace.as_deref(),
             limit,
             &sort,
             cli.json,
+            enrich_fs,
         ),
-        Command::Info { session_id } => cmd_info(&session_id, cli.json),
+        Command::Info {
+            session_id,
+            enrich_fs,
+        } => cmd_info(&session_id, cli.json, enrich_fs),
         Command::Providers => cmd_providers(cli.json),
         Command::Completions { shell } => cmd_completions(&shell),
     };
@@ -381,6 +394,7 @@ fn cmd_list(
     limit: usize,
     sort: &str,
     json_mode: bool,
+    enrich_fs: bool,
 ) -> anyhow::Result<()> {
     let registry = ProviderRegistry::default_registry();
     let installed = registry.installed_providers();
@@ -823,13 +837,18 @@ fn cmd_list(
         provider_slug: &str,
         path: PathBuf,
         session: casr::model::CanonicalSession,
+        enrich_fs: bool,
     ) -> SessionSummary {
         let last_active_at = session_activity_millis(&session, &path);
         let (file_size_bytes, unique_user_messages, avg_agent_response_chars, tool_uses) =
             session_metrics(provider_slug, &session, &path);
         let (workspace_name, workspace_name_source) =
             casr::model::workspace_name_and_source_from_workspace(session.workspace.as_deref());
-        let repo_name = casr::model::repo_name_from_workspace(session.workspace.as_deref());
+        let repo_name = if enrich_fs {
+            casr::model::repo_name_from_workspace(session.workspace.as_deref())
+        } else {
+            None
+        };
 
         SessionSummary {
             session_id: session.session_id,
@@ -1058,7 +1077,7 @@ fn cmd_list(
                             return None;
                         }
                         let session = provider.read_session(&path).ok()?;
-                        Some(build_summary(&provider_slug, path, session))
+                        Some(build_summary(&provider_slug, path, session, enrich_fs))
                     })
                     .collect()
             } else {
@@ -1070,7 +1089,7 @@ fn cmd_list(
                             return None;
                         }
                         let session = provider.read_session(&path).ok()?;
-                        Some(build_summary(&provider_slug, path, session))
+                        Some(build_summary(&provider_slug, path, session, enrich_fs))
                     })
                     .collect()
             };
@@ -1124,7 +1143,7 @@ fn cmd_list(
                 .into_iter()
                 .filter_map(|path| {
                     let session = provider.read_session(&path).ok()?;
-                    Some(build_summary(&provider_slug, path, session))
+                    Some(build_summary(&provider_slug, path, session, enrich_fs))
                 })
                 .collect()
         } else {
@@ -1132,7 +1151,7 @@ fn cmd_list(
                 .into_par_iter()
                 .filter_map(|path| {
                     let session = provider.read_session(&path).ok()?;
-                    Some(build_summary(&provider_slug, path, session))
+                    Some(build_summary(&provider_slug, path, session, enrich_fs))
                 })
                 .collect()
         };
@@ -1240,7 +1259,6 @@ fn cmd_list(
                 .with_column(Column::new("#").justify(JustifyMethod::Right).width(3))
                 .with_column(Column::new("Session ID").min_width(36))
                 .with_column(Column::new("Workspace").min_width(16))
-                .with_column(Column::new("Repo").min_width(16))
                 .with_column(Column::new("Msgs").justify(JustifyMethod::Right).width(6))
                 .with_column(
                     Column::new("Size KB")
@@ -1272,12 +1290,14 @@ fn cmd_list(
                         .justify(JustifyMethod::Left)
                         .min_width(22),
                 );
+            if enrich_fs {
+                table = table.with_column(Column::new("Repo").min_width(16));
+            }
 
             for (idx, s) in provider_sessions.iter().enumerate() {
                 let rank = (idx + 1).to_string();
                 let session_id = s.session_id.as_str();
                 let workspace_name = s.workspace_name.as_deref().unwrap_or("-");
-                let repo_name = s.repo_name.as_deref().unwrap_or("-");
                 let messages = s.messages.to_string();
                 let messages_cell_style = message_count_style(s.messages);
                 let size_kb = s.file_size_display();
@@ -1287,11 +1307,10 @@ fn cmd_list(
                 let started = s.started_at_display();
                 let last_active = s.last_active_display(now_millis);
                 let last_active_cell_style = last_active_style(s.last_active_at, now_millis);
-                table.add_row(Row::new(vec![
+                let mut row = vec![
                     Cell::new(rank.as_str()),
                     Cell::new(session_id),
                     Cell::new(workspace_name),
-                    Cell::new(repo_name),
                     Cell::new(messages.as_str()).style(messages_cell_style),
                     Cell::new(size_kb.as_str()),
                     Cell::new(unique_users.as_str()),
@@ -1299,7 +1318,11 @@ fn cmd_list(
                     Cell::new(tool_uses.as_str()),
                     Cell::new(started.as_str()),
                     Cell::new(last_active.as_str()).style(last_active_cell_style),
-                ]));
+                ];
+                if enrich_fs {
+                    row.insert(3, Cell::new(s.repo_name.as_deref().unwrap_or("-")));
+                }
+                table.add_row(Row::new(row));
             }
 
             console.print_renderable(&table);
@@ -1310,13 +1333,17 @@ fn cmd_list(
     Ok(())
 }
 
-fn cmd_info(session_id: &str, json_mode: bool) -> anyhow::Result<()> {
+fn cmd_info(session_id: &str, json_mode: bool, enrich_fs: bool) -> anyhow::Result<()> {
     let registry = ProviderRegistry::default_registry();
     let resolved = registry.resolve_session(session_id, None)?;
     let session = resolved.provider.read_session(&resolved.path)?;
     let (workspace_name, workspace_name_source) =
         casr::model::workspace_name_and_source_from_workspace(session.workspace.as_deref());
-    let repo_name = casr::model::repo_name_from_workspace(session.workspace.as_deref());
+    let repo_name = if enrich_fs {
+        casr::model::repo_name_from_workspace(session.workspace.as_deref())
+    } else {
+        None
+    };
 
     if json_mode {
         let json = serde_json::json!({

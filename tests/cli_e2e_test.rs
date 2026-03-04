@@ -310,6 +310,60 @@ fn cli_list_json_is_valid_array() {
 }
 
 #[test]
+fn cli_list_json_repo_name_is_null_without_enrich_fs() {
+    let tmp = TempDir::new().unwrap();
+    let repo_root = tmp.path().join("repo-list-a");
+    let workspace = repo_root.join("apps/backend");
+    fs::create_dir_all(repo_root.join(".git")).expect("create .git dir");
+    fs::create_dir_all(&workspace).expect("create workspace dir");
+    let workspace_str = workspace.to_string_lossy().to_string();
+    setup_cc_fixture_custom(&tmp, "cc_simple", Some(&workspace_str), None);
+
+    let output = casr_cmd(&tmp)
+        .args(["--json", "list", "--workspace", &workspace_str])
+        .output()
+        .expect("list should run");
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("list --json should emit valid JSON");
+    let sessions = parsed.as_array().expect("list --json should be an array");
+    assert!(!sessions.is_empty());
+    assert!(sessions[0]["repo_name"].is_null());
+}
+
+#[test]
+fn cli_list_json_repo_name_is_populated_with_enrich_fs() {
+    let tmp = TempDir::new().unwrap();
+    let repo_root = tmp.path().join("repo-list-b");
+    let workspace = repo_root.join("apps/backend");
+    fs::create_dir_all(repo_root.join(".git")).expect("create .git dir");
+    fs::create_dir_all(&workspace).expect("create workspace dir");
+    let workspace_str = workspace.to_string_lossy().to_string();
+    setup_cc_fixture_custom(&tmp, "cc_simple", Some(&workspace_str), None);
+
+    let output = casr_cmd(&tmp)
+        .args([
+            "--json",
+            "list",
+            "--workspace",
+            &workspace_str,
+            "--enrich-fs",
+        ])
+        .output()
+        .expect("list should run");
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("list --json should emit valid JSON");
+    let sessions = parsed.as_array().expect("list --json should be an array");
+    assert!(!sessions.is_empty());
+    assert_eq!(sessions[0]["repo_name"].as_str(), Some("repo-list-b"));
+}
+
+#[test]
 fn cli_list_limit_respects_bound() {
     let tmp = TempDir::new().unwrap();
     setup_cc_fixture(&tmp, "cc_simple");
@@ -472,6 +526,52 @@ fn cli_info_json_is_valid() {
         serde_json::from_str(&stdout).expect("info --json should emit valid JSON");
     assert_eq!(parsed["session_id"].as_str().unwrap(), session_id);
     assert_eq!(parsed["provider"].as_str().unwrap(), "claude-code");
+}
+
+#[test]
+fn cli_info_json_repo_name_is_null_without_enrich_fs() {
+    let tmp = TempDir::new().unwrap();
+    let repo_root = tmp.path().join("repo-alpha");
+    let workspace = repo_root.join("apps/backend");
+    fs::create_dir_all(repo_root.join(".git")).expect("create .git dir");
+    fs::create_dir_all(&workspace).expect("create workspace dir");
+
+    let workspace_str = workspace.to_string_lossy().to_string();
+    let session_id = setup_cc_fixture_custom(&tmp, "cc_simple", Some(&workspace_str), None);
+
+    let output = casr_cmd(&tmp)
+        .args(["--json", "info", &session_id])
+        .output()
+        .expect("info should run");
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("info --json should emit valid JSON");
+    assert!(parsed["repo_name"].is_null());
+}
+
+#[test]
+fn cli_info_json_repo_name_is_populated_with_enrich_fs() {
+    let tmp = TempDir::new().unwrap();
+    let repo_root = tmp.path().join("repo-beta");
+    let workspace = repo_root.join("apps/backend");
+    fs::create_dir_all(repo_root.join(".git")).expect("create .git dir");
+    fs::create_dir_all(&workspace).expect("create workspace dir");
+
+    let workspace_str = workspace.to_string_lossy().to_string();
+    let session_id = setup_cc_fixture_custom(&tmp, "cc_simple", Some(&workspace_str), None);
+
+    let output = casr_cmd(&tmp)
+        .args(["--json", "info", &session_id, "--enrich-fs"])
+        .output()
+        .expect("info should run");
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("info --json should emit valid JSON");
+    assert_eq!(parsed["repo_name"].as_str(), Some("repo-beta"));
 }
 
 #[test]

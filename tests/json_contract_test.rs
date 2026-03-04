@@ -427,6 +427,7 @@ fn contract_list_json_shape_cc() {
         arr[0]["workspace_name_source"].as_str(),
         Some("workspace_path_basename")
     );
+    assert!(arr[0]["repo_name"].is_null());
 }
 
 #[test]
@@ -574,6 +575,7 @@ fn contract_info_json_shape_cc() {
         parsed["workspace_name_source"].as_str(),
         Some("workspace_path_basename")
     );
+    assert!(parsed["repo_name"].is_null());
 }
 
 #[test]
