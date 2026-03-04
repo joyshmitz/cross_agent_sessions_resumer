@@ -279,9 +279,14 @@ source_session_for_alias() {
     # Also query casr list (workspace-scoped) and try candidates in recency order.
     run_cmd "$prefix" timeout 25s "$CASR" --json list --provider "$slug" --workspace "$SMOKE_WORKSPACE" --limit 25
     if [[ "$LAST_EXIT" -eq 0 ]]; then
+        local list_ids
+        if ! list_ids=$(jq -er 'if (.schema_version == 2 and (.items | type == "array")) then ((.items[]? | .session_id // empty)) else error("Missing schema_version=2 items envelope") end' "$LAST_STDOUT_FILE" 2>/dev/null); then
+            log "Rejected casr list JSON for $alias (missing schema_version=2 items envelope)"
+            list_ids=""
+        fi
         while IFS= read -r sid; do
             [[ -n "$sid" ]] && candidate_ids+=("$sid")
-        done < <(jq -r 'if type=="array" then .[] else (.items // [])[] end | .session_id // empty' "$LAST_STDOUT_FILE" 2>/dev/null || true)
+        done <<< "$list_ids"
     fi
 
     local seen_ids="|"
