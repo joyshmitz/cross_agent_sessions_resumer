@@ -46,6 +46,14 @@ fn casr_cmd(tmp: &TempDir) -> Command {
     cmd
 }
 
+fn list_items<'a>(parsed: &'a serde_json::Value) -> &'a [serde_json::Value] {
+    parsed
+        .get("items")
+        .and_then(|v| v.as_array())
+        .map(Vec::as_slice)
+        .expect("list --json should return an object with items array")
+}
+
 /// Set up a Claude Code session fixture in the temp dir.
 ///
 /// Creates the expected directory structure:
@@ -288,7 +296,7 @@ fn cli_list_shows_full_session_id_and_last_active_for_current_project_scope() {
 }
 
 #[test]
-fn cli_list_json_is_valid_array() {
+fn cli_list_json_is_valid_envelope() {
     let tmp = TempDir::new().unwrap();
     setup_cc_fixture(&tmp, "cc_simple");
     let output = casr_cmd(&tmp)
@@ -300,9 +308,10 @@ fn cli_list_json_is_valid_array() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =
         serde_json::from_str(&stdout).expect("list --json should emit valid JSON");
-    assert!(parsed.is_array());
-    assert!(!parsed.as_array().unwrap().is_empty());
-    let first = &parsed.as_array().unwrap()[0];
+    assert_eq!(parsed["schema_version"].as_u64(), Some(1));
+    let items = list_items(&parsed);
+    assert!(!items.is_empty());
+    let first = &items[0];
     assert!(first.get("file_size_kb").is_some());
     assert!(first.get("unique_user_messages").is_some());
     assert!(first.get("avg_agent_response_chars_rounded").is_some());
@@ -328,7 +337,7 @@ fn cli_list_json_repo_name_is_null_without_enrich_fs() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =
         serde_json::from_str(&stdout).expect("list --json should emit valid JSON");
-    let sessions = parsed.as_array().expect("list --json should be an array");
+    let sessions = list_items(&parsed);
     assert!(!sessions.is_empty());
     assert!(sessions[0]["repo_name"].is_null());
 }
@@ -358,7 +367,7 @@ fn cli_list_json_repo_name_is_populated_with_enrich_fs() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =
         serde_json::from_str(&stdout).expect("list --json should emit valid JSON");
-    let sessions = parsed.as_array().expect("list --json should be an array");
+    let sessions = list_items(&parsed);
     assert!(!sessions.is_empty());
     assert_eq!(sessions[0]["repo_name"].as_str(), Some("repo-list-b"));
 }
@@ -420,7 +429,7 @@ fn cli_list_limit_respects_bound() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
-    assert_eq!(parsed.as_array().unwrap().len(), 1);
+    assert_eq!(list_items(&parsed).len(), 1);
 }
 
 #[test]
@@ -444,7 +453,7 @@ fn cli_list_limit_applies_per_provider() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
-    let sessions = parsed.as_array().expect("list --json should be an array");
+    let sessions = list_items(&parsed);
 
     let mut counts_by_provider: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
@@ -482,7 +491,7 @@ fn cli_list_workspace_filter_filters_sessions() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
-    let sessions = parsed.as_array().expect("list --json should be an array");
+    let sessions = list_items(&parsed);
 
     assert!(
         sessions
@@ -522,7 +531,7 @@ fn cli_list_sort_messages_orders_descending() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value = serde_json::from_str(&stdout).unwrap();
-    let sessions = parsed.as_array().expect("list --json should be an array");
+    let sessions = list_items(&parsed);
 
     assert_eq!(sessions.len(), 2);
     assert_eq!(
@@ -884,9 +893,7 @@ fn cli_list_defaults_to_current_workspace_and_top_10() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =
         serde_json::from_str(&stdout).expect("list --json should emit valid JSON");
-    let arr = parsed
-        .as_array()
-        .expect("list --json should return an array of sessions");
+    let arr = list_items(&parsed);
 
     assert_eq!(
         arr.len(),
@@ -920,9 +927,7 @@ fn cli_list_defaults_to_current_workspace_and_top_10() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =
         serde_json::from_str(&stdout).expect("list --workspace --json should emit valid JSON");
-    let arr = parsed
-        .as_array()
-        .expect("list --workspace --json should return an array");
+    let arr = list_items(&parsed);
     assert!(
         arr.iter()
             .any(|e| e["session_id"].as_str() == Some(out_of_scope_sid)),
@@ -951,9 +956,7 @@ fn cli_list_provider_filter_accepts_claude_standard_name() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =
         serde_json::from_str(&stdout).expect("list --json should emit valid JSON");
-    let arr = parsed
-        .as_array()
-        .expect("list --json should return an array of sessions");
+    let arr = list_items(&parsed);
     assert!(!arr.is_empty(), "should find at least one Claude session");
     assert!(
         arr.iter()

@@ -2,49 +2,60 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://casr.dev/schema/session-list.json",
   "title": "casr list --json",
-  "type": "array",
-  "items": {
-    "type": "object",
-    "additionalProperties": false,
-    "required": [
-      "schema_version",
-      "session_id",
-      "provider",
-      "title",
-      "workspace_name",
-      "workspace_name_source",
-      "repo_name",
-      "messages",
-      "workspace",
-      "started_at",
-      "last_active_at",
-      "file_size_bytes",
-      "file_size_kb",
-      "unique_user_messages",
-      "avg_agent_response_chars",
-      "avg_agent_response_chars_rounded",
-      "tool_uses",
-      "path"
-    ],
-    "properties": {
-      "schema_version": {"type": "integer", "const": 1},
-      "session_id": {"type": "string"},
-      "provider": {"type": "string"},
-      "title": {"type": ["string", "null"]},
-      "workspace_name": {"type": ["string", "null"]},
-      "workspace_name_source": {"type": ["string", "null"]},
-      "repo_name": {"type": ["string", "null"]},
-      "messages": {"type": "integer", "minimum": 0},
-      "workspace": {"type": ["string", "null"]},
-      "started_at": {"type": ["integer", "null"]},
-      "last_active_at": {"type": ["integer", "null"]},
-      "file_size_bytes": {"type": "integer", "minimum": 0},
-      "file_size_kb": {"type": "integer", "minimum": 0},
-      "unique_user_messages": {"type": "integer", "minimum": 0},
-      "avg_agent_response_chars": {"type": "number", "minimum": 0},
-      "avg_agent_response_chars_rounded": {"type": "integer", "minimum": 0},
-      "tool_uses": {"type": "integer", "minimum": 0},
-      "path": {"type": "string"}
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "items"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schema_version",
+          "session_id",
+          "provider",
+          "title",
+          "workspace_name",
+          "workspace_name_source",
+          "repo_name",
+          "messages",
+          "workspace",
+          "started_at",
+          "last_active_at",
+          "file_size_bytes",
+          "file_size_kb",
+          "unique_user_messages",
+          "avg_agent_response_chars",
+          "avg_agent_response_chars_rounded",
+          "tool_uses",
+          "path"
+        ],
+        "properties": {
+          "schema_version": {"type": "integer", "const": 1},
+          "session_id": {"type": "string"},
+          "provider": {"type": "string"},
+          "title": {"type": ["string", "null"]},
+          "workspace_name": {"type": ["string", "null"]},
+          "workspace_name_source": {"type": ["string", "null"]},
+          "repo_name": {"type": ["string", "null"]},
+          "messages": {"type": "integer", "minimum": 0},
+          "workspace": {"type": ["string", "null"]},
+          "started_at": {"type": ["integer", "null"]},
+          "last_active_at": {"type": ["integer", "null"]},
+          "file_size_bytes": {"type": "integer", "minimum": 0},
+          "file_size_kb": {"type": "integer", "minimum": 0},
+          "unique_user_messages": {"type": "integer", "minimum": 0},
+          "avg_agent_response_chars": {"type": "number", "minimum": 0},
+          "avg_agent_response_chars_rounded": {"type": "integer", "minimum": 0},
+          "tool_uses": {"type": "integer", "minimum": 0},
+          "path": {"type": "string"}
+        }
+      }
     }
   }
 }

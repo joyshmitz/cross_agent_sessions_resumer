@@ -1212,12 +1212,16 @@ fn cmd_list(
     );
 
     if json_mode {
-        let mut json: Vec<serde_json::Value> = Vec::new();
+        let mut items: Vec<serde_json::Value> = Vec::new();
         for sessions in sessions_by_provider.values() {
             for session in sessions {
-                json.push(session.to_json());
+                items.push(session.to_json());
             }
         }
+        let json = serde_json::json!({
+            "schema_version": JSON_SCHEMA_VERSION,
+            "items": items,
+        });
         println!("{}", serde_json::to_string_pretty(&json)?);
     } else {
         if non_empty_group_count == 0 {
