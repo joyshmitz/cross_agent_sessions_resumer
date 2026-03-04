@@ -188,6 +188,20 @@ pub fn workspace_name_from_workspace(workspace: Option<&Path>) -> Option<String>
         .filter(|name| !name.is_empty())
 }
 
+/// Machine-readable origin for `workspace_name`.
+pub const WORKSPACE_NAME_SOURCE_WORKSPACE_PATH_BASENAME: &str = "workspace_path_basename";
+
+/// Derive workspace name with provenance information.
+pub fn workspace_name_and_source_from_workspace(
+    workspace: Option<&Path>,
+) -> (Option<String>, Option<&'static str>) {
+    let workspace_name = workspace_name_from_workspace(workspace);
+    let source = workspace_name
+        .as_ref()
+        .map(|_| WORKSPACE_NAME_SOURCE_WORKSPACE_PATH_BASENAME);
+    (workspace_name, source)
+}
+
 /// Parse a timestamp value into epoch milliseconds.
 ///
 /// Accepts:
@@ -422,6 +436,21 @@ mod tests {
     fn workspace_name_from_workspace_root_has_no_name() {
         let workspace = Path::new("/");
         assert_eq!(workspace_name_from_workspace(Some(workspace)), None);
+    }
+
+    #[test]
+    fn workspace_name_and_source_from_workspace_reports_source() {
+        let workspace = Path::new("/data/projects/myapp");
+        let (name, source) = workspace_name_and_source_from_workspace(Some(workspace));
+        assert_eq!(name.as_deref(), Some("myapp"));
+        assert_eq!(source, Some(WORKSPACE_NAME_SOURCE_WORKSPACE_PATH_BASENAME));
+    }
+
+    #[test]
+    fn workspace_name_and_source_from_workspace_none_has_no_source() {
+        let (name, source) = workspace_name_and_source_from_workspace(None);
+        assert_eq!(name, None);
+        assert_eq!(source, None);
     }
 
     // -----------------------------------------------------------------------

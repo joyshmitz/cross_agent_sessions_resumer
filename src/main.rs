@@ -394,6 +394,7 @@ fn cmd_list(
         provider: String,
         title: Option<String>,
         workspace_name: Option<String>,
+        workspace_name_source: Option<&'static str>,
         messages: usize,
         workspace: Option<PathBuf>,
         started_at: Option<i64>,
@@ -449,6 +450,7 @@ fn cmd_list(
                 "provider": self.provider,
                 "title": self.title,
                 "workspace_name": self.workspace_name,
+                "workspace_name_source": self.workspace_name_source,
                 "messages": self.messages,
                 "workspace": self.workspace.as_ref().map(|w| w.display().to_string()),
                 "started_at": self.started_at,
@@ -823,14 +825,15 @@ fn cmd_list(
         let last_active_at = session_activity_millis(&session, &path);
         let (file_size_bytes, unique_user_messages, avg_agent_response_chars, tool_uses) =
             session_metrics(provider_slug, &session, &path);
-        let workspace_name =
-            casr::model::workspace_name_from_workspace(session.workspace.as_deref());
+        let (workspace_name, workspace_name_source) =
+            casr::model::workspace_name_and_source_from_workspace(session.workspace.as_deref());
 
         SessionSummary {
             session_id: session.session_id,
             provider: provider_slug.to_string(),
             title: session.title,
             workspace_name,
+            workspace_name_source,
             messages: session.messages.len(),
             workspace: session.workspace,
             started_at: session.started_at,
@@ -1304,7 +1307,8 @@ fn cmd_info(session_id: &str, json_mode: bool) -> anyhow::Result<()> {
     let registry = ProviderRegistry::default_registry();
     let resolved = registry.resolve_session(session_id, None)?;
     let session = resolved.provider.read_session(&resolved.path)?;
-    let workspace_name = casr::model::workspace_name_from_workspace(session.workspace.as_deref());
+    let (workspace_name, workspace_name_source) =
+        casr::model::workspace_name_and_source_from_workspace(session.workspace.as_deref());
 
     if json_mode {
         let json = serde_json::json!({
@@ -1312,6 +1316,7 @@ fn cmd_info(session_id: &str, json_mode: bool) -> anyhow::Result<()> {
             "provider": session.provider_slug,
             "title": session.title,
             "workspace_name": workspace_name,
+            "workspace_name_source": workspace_name_source,
             "workspace": session.workspace.as_ref().map(|w| w.display().to_string()),
             "messages": session.messages.len(),
             "started_at": session.started_at,
@@ -1333,6 +1338,9 @@ fn cmd_info(session_id: &str, json_mode: bool) -> anyhow::Result<()> {
         }
         if let Some(ref workspace_name) = workspace_name {
             println!("  {} {workspace_name}", "Workspace Name:".dimmed());
+        }
+        if let Some(source) = workspace_name_source {
+            println!("  {} {source}", "Workspace Name Source:".dimmed());
         }
         println!("  {} {}", "Messages:".dimmed(), session.messages.len());
         if let Some(ref model) = session.model_name {
