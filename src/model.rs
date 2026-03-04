@@ -19,7 +19,7 @@
 //! - `Snippet` type — code snippet extraction is a CASS indexing feature.
 //! - Database `id` fields — casr has no database.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -176,6 +176,16 @@ pub fn flatten_content(value: &serde_json::Value) -> String {
         }
         _ => String::new(),
     }
+}
+
+/// Derive a workspace display name from a workspace path.
+///
+/// Returns the final path component exactly as represented on disk.
+pub fn workspace_name_from_workspace(workspace: Option<&Path>) -> Option<String> {
+    workspace
+        .and_then(Path::file_name)
+        .map(|name| name.to_string_lossy().to_string())
+        .filter(|name| !name.is_empty())
 }
 
 /// Parse a timestamp value into epoch milliseconds.
@@ -379,6 +389,39 @@ mod tests {
             flatten_content(&val),
             "first\nsecond\n[Tool: Edit - fix bug]"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // workspace_name_from_workspace
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn workspace_name_from_workspace_extracts_basename() {
+        let workspace = Path::new("/data/projects/myapp");
+        assert_eq!(
+            workspace_name_from_workspace(Some(workspace)),
+            Some("myapp".to_string())
+        );
+    }
+
+    #[test]
+    fn workspace_name_from_workspace_handles_none() {
+        assert_eq!(workspace_name_from_workspace(None), None);
+    }
+
+    #[test]
+    fn workspace_name_from_workspace_preserves_significant_whitespace() {
+        let workspace = Path::new("/data/projects/myapp ");
+        assert_eq!(
+            workspace_name_from_workspace(Some(workspace)),
+            Some("myapp ".to_string())
+        );
+    }
+
+    #[test]
+    fn workspace_name_from_workspace_root_has_no_name() {
+        let workspace = Path::new("/");
+        assert_eq!(workspace_name_from_workspace(Some(workspace)), None);
     }
 
     // -----------------------------------------------------------------------

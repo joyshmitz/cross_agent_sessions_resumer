@@ -285,16 +285,6 @@ fn error_type_name(e: &anyhow::Error) -> &'static str {
     }
 }
 
-/// Derive workspace directory name from a workspace path.
-///
-/// Returns the last path component (directory name) when available.
-fn workspace_name_from_workspace(workspace: Option<&Path>) -> Option<String> {
-    workspace
-        .and_then(Path::file_name)
-        .map(|name| name.to_string_lossy().trim().to_string())
-        .filter(|name| !name.is_empty())
-}
-
 // ---------------------------------------------------------------------------
 // Command implementations
 // ---------------------------------------------------------------------------
@@ -833,7 +823,8 @@ fn cmd_list(
         let last_active_at = session_activity_millis(&session, &path);
         let (file_size_bytes, unique_user_messages, avg_agent_response_chars, tool_uses) =
             session_metrics(provider_slug, &session, &path);
-        let workspace_name = workspace_name_from_workspace(session.workspace.as_deref());
+        let workspace_name =
+            casr::model::workspace_name_from_workspace(session.workspace.as_deref());
 
         SessionSummary {
             session_id: session.session_id,
@@ -1313,7 +1304,7 @@ fn cmd_info(session_id: &str, json_mode: bool) -> anyhow::Result<()> {
     let registry = ProviderRegistry::default_registry();
     let resolved = registry.resolve_session(session_id, None)?;
     let session = resolved.provider.read_session(&resolved.path)?;
-    let workspace_name = workspace_name_from_workspace(session.workspace.as_deref());
+    let workspace_name = casr::model::workspace_name_from_workspace(session.workspace.as_deref());
 
     if json_mode {
         let json = serde_json::json!({
