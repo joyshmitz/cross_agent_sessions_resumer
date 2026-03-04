@@ -538,7 +538,7 @@ impl Provider for OpenCode {
         _opts: &WriteOptions,
     ) -> anyhow::Result<WrittenSession> {
         let db_path = Self::choose_target_db_path(session)?;
-        let conn = Self::open_db_rw(&db_path)?;
+        let mut conn = Self::open_db_rw(&db_path)?;
         Self::ensure_schema(&conn)?;
 
         let has_count_trigger =
@@ -558,7 +558,9 @@ impl Provider for OpenCode {
         });
         let title = title.unwrap_or_else(|| "Converted session".to_string());
 
-        conn.execute(
+        let tx = conn.transaction().context("failed to begin transaction")?;
+
+        tx.execute(
             "INSERT INTO sessions (
                 id, parent_session_id, title, message_count, prompt_tokens, completion_tokens, cost,
                 summary_message_id, updated_at, created_at
@@ -586,7 +588,7 @@ impl Provider for OpenCode {
             let timestamp = msg.timestamp.unwrap_or(created_at);
             let model = msg.author.clone().or_else(|| default_model.clone());
 
-            conn.execute(
+            tx.execute(
                 "INSERT INTO messages (
                     id, session_id, role, parts, model, created_at, updated_at, finished_at
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)",
@@ -605,7 +607,7 @@ impl Provider for OpenCode {
 
         // If the DB has no count trigger, set message_count explicitly.
         if !has_count_trigger {
-            conn.execute(
+            tx.execute(
                 "UPDATE sessions SET message_count = ?1 WHERE id = ?2",
                 rusqlite::params![
                     i64::try_from(session.messages.len()).unwrap_or(i64::MAX),
@@ -614,6 +616,8 @@ impl Provider for OpenCode {
             )
             .context("failed to update OpenCode session message_count")?;
         }
+
+        tx.commit().context("failed to commit transaction")?;
 
         let virtual_path = Self::virtual_session_path(&db_path, &target_session_id);
         info!(

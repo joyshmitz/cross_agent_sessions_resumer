@@ -552,13 +552,15 @@ impl Provider for Cursor {
             }
         }
 
-        let conn = Self::open_db_rw(&global_db)?;
+        let mut conn = Self::open_db_rw(&global_db)?;
 
         // Create table if needed.
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS cursorDiskKV (key TEXT PRIMARY KEY, value TEXT);",
         )
         .context("failed to create cursorDiskKV table")?;
+
+        let tx = conn.transaction().context("failed to begin transaction")?;
 
         // Build bubble entries and conversation headers.
         let mut headers: Vec<serde_json::Value> = Vec::new();
@@ -580,7 +582,7 @@ impl Provider for Cursor {
             let bubble_key = format!("bubbleId:{target_composer_id}:{bubble_id}");
             let bubble_json = serde_json::to_string(&bubble)?;
 
-            conn.execute(
+            tx.execute(
                 "INSERT OR REPLACE INTO cursorDiskKV (key, value) VALUES (?1, ?2)",
                 rusqlite::params![bubble_key, bubble_json],
             )
@@ -606,11 +608,13 @@ impl Provider for Cursor {
         let composer_key = format!("composerData:{target_composer_id}");
         let composer_json = serde_json::to_string(&composer_data)?;
 
-        conn.execute(
+        tx.execute(
             "INSERT OR REPLACE INTO cursorDiskKV (key, value) VALUES (?1, ?2)",
             rusqlite::params![composer_key, composer_json],
         )
         .context("failed to insert composerData")?;
+
+        tx.commit().context("failed to commit transaction")?;
 
         info!(
             target_composer_id,
