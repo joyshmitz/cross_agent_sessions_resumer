@@ -196,10 +196,8 @@ pub fn parse_timestamp(value: &serde_json::Value) -> Option<i64> {
         serde_json::Value::Number(n) => {
             if let Some(i) = n.as_i64() {
                 Some(if i < MILLIS_THRESHOLD { i * 1000 } else { i })
-            } else if let Some(f) = n.as_f64() {
-                Some(if f < (MILLIS_THRESHOLD as f64) { (f * 1000.0) as i64 } else { f as i64 })
             } else {
-                None
+                n.as_f64().map(|f| if f < (MILLIS_THRESHOLD as f64) { (f * 1000.0) as i64 } else { f as i64 })
             }
         }
         serde_json::Value::String(s) => {
