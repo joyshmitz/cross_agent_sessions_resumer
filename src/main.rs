@@ -285,6 +285,16 @@ fn error_type_name(e: &anyhow::Error) -> &'static str {
     }
 }
 
+/// Derive workspace directory name from a workspace path.
+///
+/// Returns the last path component (directory name) when available.
+fn workspace_name_from_workspace(workspace: Option<&Path>) -> Option<String> {
+    workspace
+        .and_then(Path::file_name)
+        .map(|name| name.to_string_lossy().trim().to_string())
+        .filter(|name| !name.is_empty())
+}
+
 // ---------------------------------------------------------------------------
 // Command implementations
 // ---------------------------------------------------------------------------
@@ -393,6 +403,7 @@ fn cmd_list(
         session_id: String,
         provider: String,
         title: Option<String>,
+        workspace_name: Option<String>,
         messages: usize,
         workspace: Option<PathBuf>,
         started_at: Option<i64>,
@@ -447,6 +458,7 @@ fn cmd_list(
                 "session_id": self.session_id,
                 "provider": self.provider,
                 "title": self.title,
+                "workspace_name": self.workspace_name,
                 "messages": self.messages,
                 "workspace": self.workspace.as_ref().map(|w| w.display().to_string()),
                 "started_at": self.started_at,
@@ -821,11 +833,13 @@ fn cmd_list(
         let last_active_at = session_activity_millis(&session, &path);
         let (file_size_bytes, unique_user_messages, avg_agent_response_chars, tool_uses) =
             session_metrics(provider_slug, &session, &path);
+        let workspace_name = workspace_name_from_workspace(session.workspace.as_deref());
 
         SessionSummary {
             session_id: session.session_id,
             provider: provider_slug.to_string(),
             title: session.title,
+            workspace_name,
             messages: session.messages.len(),
             workspace: session.workspace,
             started_at: session.started_at,
@@ -1227,6 +1241,7 @@ fn cmd_list(
                 .border_style(Style::parse("cyan").unwrap_or_default())
                 .with_column(Column::new("#").justify(JustifyMethod::Right).width(3))
                 .with_column(Column::new("Session ID").min_width(36))
+                .with_column(Column::new("Workspace").min_width(16))
                 .with_column(Column::new("Msgs").justify(JustifyMethod::Right).width(6))
                 .with_column(
                     Column::new("Size KB")
@@ -1262,6 +1277,7 @@ fn cmd_list(
             for (idx, s) in provider_sessions.iter().enumerate() {
                 let rank = (idx + 1).to_string();
                 let session_id = s.session_id.as_str();
+                let workspace_name = s.workspace_name.as_deref().unwrap_or("-");
                 let messages = s.messages.to_string();
                 let messages_cell_style = message_count_style(s.messages);
                 let size_kb = s.file_size_display();
@@ -1274,6 +1290,7 @@ fn cmd_list(
                 table.add_row(Row::new(vec![
                     Cell::new(rank.as_str()),
                     Cell::new(session_id),
+                    Cell::new(workspace_name),
                     Cell::new(messages.as_str()).style(messages_cell_style),
                     Cell::new(size_kb.as_str()),
                     Cell::new(unique_users.as_str()),
@@ -1296,12 +1313,14 @@ fn cmd_info(session_id: &str, json_mode: bool) -> anyhow::Result<()> {
     let registry = ProviderRegistry::default_registry();
     let resolved = registry.resolve_session(session_id, None)?;
     let session = resolved.provider.read_session(&resolved.path)?;
+    let workspace_name = workspace_name_from_workspace(session.workspace.as_deref());
 
     if json_mode {
         let json = serde_json::json!({
             "session_id": session.session_id,
             "provider": session.provider_slug,
             "title": session.title,
+            "workspace_name": workspace_name,
             "workspace": session.workspace.as_ref().map(|w| w.display().to_string()),
             "messages": session.messages.len(),
             "started_at": session.started_at,
@@ -1320,6 +1339,9 @@ fn cmd_info(session_id: &str, json_mode: bool) -> anyhow::Result<()> {
         }
         if let Some(ref ws) = session.workspace {
             println!("  {} {}", "Workspace:".dimmed(), ws.display());
+        }
+        if let Some(ref workspace_name) = workspace_name {
+            println!("  {} {workspace_name}", "Workspace Name:".dimmed());
         }
         println!("  {} {}", "Messages:".dimmed(), session.messages.len());
         if let Some(ref model) = session.model_name {
