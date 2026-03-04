@@ -56,6 +56,9 @@ pub struct ListItem {
     pub workspace_name: Option<String>,
     /// How `workspace_name` was determined.
     pub workspace_name_source: Option<String>,
+    /// Repository name from filesystem git root (only when `--enrich-fs` is set).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_name: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -80,6 +83,9 @@ pub struct InfoResponse {
     pub workspace_name: Option<String>,
     /// How `workspace_name` was determined.
     pub workspace_name_source: Option<String>,
+    /// Repository name from filesystem git root (only when `--enrich-fs` is set).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_name: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -211,6 +217,7 @@ mod tests {
             path: "/tmp/session.jsonl".to_string(),
             workspace_name: Some("test".to_string()),
             workspace_name_source: Some("session_workspace_path".to_string()),
+            repo_name: None,
         };
         let envelope = ListEnvelope::new(vec![item]);
         let json = serde_json::to_value(&envelope).unwrap();
@@ -245,6 +252,7 @@ mod tests {
             metadata: serde_json::json!({"key": "value"}),
             workspace_name: None,
             workspace_name_source: Some("none".to_string()),
+            repo_name: None,
         };
         let json = serde_json::to_value(&info).unwrap();
         assert_eq!(json["schema_version"], 2);
@@ -331,6 +339,86 @@ mod tests {
     // -----------------------------------------------------------------------
     // ErrorEnvelope serialization
     // -----------------------------------------------------------------------
+
+    #[test]
+    fn list_item_repo_name_omitted_when_none() {
+        let item = ListItem {
+            schema_version: SCHEMA_VERSION,
+            session_id: "sid".to_string(),
+            provider: "test".to_string(),
+            title: None,
+            messages: 0,
+            workspace: None,
+            started_at: None,
+            last_active_at: None,
+            file_size_bytes: 0,
+            file_size_kb: 0,
+            unique_user_messages: 0,
+            avg_agent_response_chars: 0.0,
+            avg_agent_response_chars_rounded: 0,
+            tool_uses: 0,
+            path: "/tmp/x".to_string(),
+            workspace_name: None,
+            workspace_name_source: Some("none".to_string()),
+            repo_name: None,
+        };
+        let json = serde_json::to_value(&item).unwrap();
+        assert!(
+            !json.as_object().unwrap().contains_key("repo_name"),
+            "repo_name should be omitted from JSON when None"
+        );
+    }
+
+    #[test]
+    fn list_item_repo_name_present_when_set() {
+        let item = ListItem {
+            schema_version: SCHEMA_VERSION,
+            session_id: "sid".to_string(),
+            provider: "test".to_string(),
+            title: None,
+            messages: 0,
+            workspace: Some("/data/projects/my_repo".to_string()),
+            started_at: None,
+            last_active_at: None,
+            file_size_bytes: 0,
+            file_size_kb: 0,
+            unique_user_messages: 0,
+            avg_agent_response_chars: 0.0,
+            avg_agent_response_chars_rounded: 0,
+            tool_uses: 0,
+            path: "/tmp/x".to_string(),
+            workspace_name: Some("my_repo".to_string()),
+            workspace_name_source: Some("session_workspace_path".to_string()),
+            repo_name: Some("my_repo".to_string()),
+        };
+        let json = serde_json::to_value(&item).unwrap();
+        assert_eq!(json["repo_name"], "my_repo");
+    }
+
+    #[test]
+    fn info_response_repo_name_omitted_when_none() {
+        let info = InfoResponse {
+            schema_version: SCHEMA_VERSION,
+            session_id: "sid".to_string(),
+            provider: "test".to_string(),
+            title: None,
+            workspace: None,
+            messages: 0,
+            started_at: None,
+            ended_at: None,
+            model_name: None,
+            source_path: "/tmp/x".to_string(),
+            metadata: serde_json::json!(null),
+            workspace_name: None,
+            workspace_name_source: Some("none".to_string()),
+            repo_name: None,
+        };
+        let json = serde_json::to_value(&info).unwrap();
+        assert!(
+            !json.as_object().unwrap().contains_key("repo_name"),
+            "repo_name should be omitted from info JSON when None"
+        );
+    }
 
     #[test]
     fn error_envelope_serializes() {

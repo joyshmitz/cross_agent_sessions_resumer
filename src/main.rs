@@ -93,12 +93,20 @@ enum Command {
         /// Sort field (date, messages, provider).
         #[arg(long, default_value = "date")]
         sort: String,
+
+        /// Enrich output with filesystem-derived data (e.g. repo_name from git root).
+        #[arg(long)]
+        enrich_fs: bool,
     },
 
     /// Show details for a specific session.
     Info {
         /// Session ID to inspect.
         session_id: String,
+
+        /// Enrich output with filesystem-derived data (e.g. repo_name from git root).
+        #[arg(long)]
+        enrich_fs: bool,
     },
 
     /// List detected providers and their installation status.
@@ -236,14 +244,19 @@ fn main() -> ExitCode {
             workspace,
             limit,
             sort,
+            enrich_fs,
         } => cmd_list(
             provider.as_deref(),
             workspace.as_deref(),
             limit,
             &sort,
             cli.json,
+            enrich_fs,
         ),
-        Command::Info { session_id } => cmd_info(&session_id, cli.json),
+        Command::Info {
+            session_id,
+            enrich_fs,
+        } => cmd_info(&session_id, cli.json, enrich_fs),
         Command::Providers => cmd_providers(cli.json),
         Command::Completions { shell } => cmd_completions(&shell),
     };
@@ -391,6 +404,7 @@ fn cmd_list(
     limit: usize,
     sort: &str,
     json_mode: bool,
+    enrich_fs: bool,
 ) -> anyhow::Result<()> {
     let registry = ProviderRegistry::default_registry();
     let installed = registry.installed_providers();
@@ -452,9 +466,16 @@ fn cmd_list(
                 .unwrap_or_else(|| "-".to_string())
         }
 
-        fn to_list_item(&self) -> ListItem {
+        fn to_list_item(&self, enrich_fs: bool) -> ListItem {
             let (workspace_name, workspace_name_source) =
                 responses::workspace_name_from_path(self.workspace.as_ref());
+            let repo_name = if enrich_fs {
+                self.workspace
+                    .as_ref()
+                    .and_then(|ws| casr::discovery::repo_name_from_path(ws))
+            } else {
+                None
+            };
             ListItem {
                 schema_version: responses::SCHEMA_VERSION,
                 session_id: self.session_id.clone(),
@@ -473,6 +494,7 @@ fn cmd_list(
                 path: self.path.display().to_string(),
                 workspace_name,
                 workspace_name_source,
+                repo_name,
             }
         }
     }
@@ -1194,7 +1216,7 @@ fn cmd_list(
         let mut items: Vec<ListItem> = Vec::new();
         for sessions in sessions_by_provider.values() {
             for session in sessions {
-                items.push(session.to_list_item());
+                items.push(session.to_list_item(enrich_fs));
             }
         }
         let envelope = ListEnvelope::new(items);
@@ -1308,7 +1330,7 @@ fn cmd_list(
     Ok(())
 }
 
-fn cmd_info(session_id: &str, json_mode: bool) -> anyhow::Result<()> {
+fn cmd_info(session_id: &str, json_mode: bool, enrich_fs: bool) -> anyhow::Result<()> {
     let registry = ProviderRegistry::default_registry();
     let resolved = registry.resolve_session(session_id, None)?;
     let session = resolved.provider.read_session(&resolved.path)?;
@@ -1316,6 +1338,14 @@ fn cmd_info(session_id: &str, json_mode: bool) -> anyhow::Result<()> {
     if json_mode {
         let (workspace_name, workspace_name_source) =
             responses::workspace_name_from_path(session.workspace.as_ref());
+        let repo_name = if enrich_fs {
+            session
+                .workspace
+                .as_ref()
+                .and_then(|ws| casr::discovery::repo_name_from_path(ws))
+        } else {
+            None
+        };
         let response = InfoResponse {
             schema_version: responses::SCHEMA_VERSION,
             session_id: session.session_id.clone(),
@@ -1330,6 +1360,7 @@ fn cmd_info(session_id: &str, json_mode: bool) -> anyhow::Result<()> {
             metadata: session.metadata.clone(),
             workspace_name,
             workspace_name_source,
+            repo_name,
         };
         println!("{}", serde_json::to_string_pretty(&response)?);
     } else {
