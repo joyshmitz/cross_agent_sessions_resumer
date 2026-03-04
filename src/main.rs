@@ -1325,7 +1325,7 @@ fn cmd_list(
                     Cell::new(last_active.as_str()).style(last_active_cell_style),
                 ];
                 if enrich_fs {
-                    row.insert(3, Cell::new(s.repo_name.as_deref().unwrap_or("-")));
+                    row.push(Cell::new(s.repo_name.as_deref().unwrap_or("-")));
                 }
                 table.add_row(Row::new(row));
             }

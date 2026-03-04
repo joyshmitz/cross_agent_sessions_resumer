@@ -364,6 +364,44 @@ fn cli_list_json_repo_name_is_populated_with_enrich_fs() {
 }
 
 #[test]
+fn cli_list_human_enrich_fs_keeps_repo_in_repo_column() {
+    let tmp = TempDir::new().unwrap();
+    let repo_root = tmp.path().join("repo-list-human");
+    let workspace = repo_root.join("apps/backend");
+    fs::create_dir_all(repo_root.join(".git")).expect("create .git dir");
+    fs::create_dir_all(&workspace).expect("create workspace dir");
+    let workspace_str = workspace.to_string_lossy().to_string();
+    let session_id = setup_cc_fixture_custom(&tmp, "cc_simple", Some(&workspace_str), None);
+
+    let output = casr_cmd(&tmp)
+        .args(["list", "--workspace", &workspace_str, "--enrich-fs"])
+        .output()
+        .expect("list should run");
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Repo"), "list table should include Repo column");
+
+    let row_line = stdout
+        .lines()
+        .find(|line| line.contains(&session_id))
+        .expect("session row should be present");
+    let cells: Vec<&str> = row_line
+        .split('│')
+        .map(str::trim)
+        .filter(|cell| !cell.is_empty())
+        .collect();
+
+    assert!(
+        cells.len() >= 11,
+        "expected row to include repo column cells, got: {cells:?}"
+    );
+    assert_eq!(cells[2], "backend", "workspace should remain in workspace column");
+    assert_eq!(cells[3], "4", "message count should remain in Msgs column");
+    assert_eq!(cells[10], "repo-list-human", "repo should appear in Repo column");
+}
+
+#[test]
 fn cli_list_limit_respects_bound() {
     let tmp = TempDir::new().unwrap();
     setup_cc_fixture(&tmp, "cc_simple");
