@@ -19,7 +19,7 @@ use tracing_subscriber::EnvFilter;
 use casr::discovery::ProviderRegistry;
 use casr::pipeline::{ConversionPipeline, ConvertOptions};
 
-const JSON_SCHEMA_VERSION: u32 = 1;
+const JSON_SCHEMA_VERSION: u32 = 2;
 
 /// Cross Agent Session Resumer — resume AI coding sessions across providers.
 ///

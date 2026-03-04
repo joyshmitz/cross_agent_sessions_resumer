@@ -501,7 +501,7 @@ When sorting by date, probe size is capped to avoid slow scans:
 
 JSON note:
 - All `--json` command outputs include a top-level or per-record `schema_version` field.
-- `list --json` uses an envelope: `{"schema_version": 1, "items": [...]}`.
+- `list --json` uses an envelope: `{"schema_version": 2, "items": [...]}`.
 - `list`/`info` default to session-intrinsic data only; host-dependent enrichment is opt-in via `--enrich-fs`.
 
 ## Performance and Scaling Notes

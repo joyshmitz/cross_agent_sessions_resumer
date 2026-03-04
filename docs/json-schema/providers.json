@@ -16,7 +16,7 @@
       "evidence"
     ],
     "properties": {
-      "schema_version": {"type": "integer", "const": 1},
+      "schema_version": {"type": "integer", "const": 2},
       "name": {"type": "string"},
       "slug": {"type": "string"},
       "alias": {"type": "string"},

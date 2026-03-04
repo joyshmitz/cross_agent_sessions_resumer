@@ -21,7 +21,7 @@
     "metadata"
   ],
   "properties": {
-    "schema_version": {"type": "integer", "const": 1},
+    "schema_version": {"type": "integer", "const": 2},
     "session_id": {"type": "string"},
     "provider": {"type": "string"},
     "title": {"type": ["string", "null"]},

@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "ok", "error_type", "message"],
   "properties": {
-    "schema_version": {"type": "integer", "const": 1},
+    "schema_version": {"type": "integer", "const": 2},
     "ok": {"type": "boolean", "const": false},
     "error_type": {"type": "string"},
     "message": {"type": "string"}

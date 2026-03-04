@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use assert_cmd::Command;
 use tempfile::TempDir;
 
-const EXPECTED_JSON_SCHEMA_VERSION: u64 = 1;
+const EXPECTED_JSON_SCHEMA_VERSION: u64 = 2;
 
 // ---------------------------------------------------------------------------
 // Helpers (fixture setup, command builder)

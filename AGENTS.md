@@ -573,7 +573,7 @@ Successful conversion (representative shape):
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "ok": true,
   "source_provider": "codex",
   "target_provider": "claude-code",
@@ -591,7 +591,7 @@ Error (representative shape):
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "ok": false,
   "error_type": "SessionNotFound",
   "message": "Session abc123 not found. Run 'casr list' to discover available sessions.",

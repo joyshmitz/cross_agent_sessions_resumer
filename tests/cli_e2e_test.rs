@@ -308,7 +308,7 @@ fn cli_list_json_is_valid_envelope() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: serde_json::Value =
         serde_json::from_str(&stdout).expect("list --json should emit valid JSON");
-    assert_eq!(parsed["schema_version"].as_u64(), Some(1));
+    assert_eq!(parsed["schema_version"].as_u64(), Some(2));
     let items = list_items(&parsed);
     assert!(!items.is_empty());
     let first = &items[0];
