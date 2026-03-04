@@ -19,6 +19,8 @@ use tracing_subscriber::EnvFilter;
 use casr::discovery::ProviderRegistry;
 use casr::pipeline::{ConversionPipeline, ConvertOptions};
 
+const JSON_SCHEMA_VERSION: u32 = 1;
+
 /// Cross Agent Session Resumer — resume AI coding sessions across providers.
 ///
 /// Convert sessions between Claude Code, Codex, Gemini CLI, Cursor, Cline, Aider, Amp, OpenCode, and ChatGPT so you can
@@ -263,6 +265,7 @@ fn main() -> ExitCode {
         Err(e) => {
             if cli.json {
                 let json = serde_json::json!({
+                    "schema_version": JSON_SCHEMA_VERSION,
                     "ok": false,
                     "error_type": error_type_name(&e),
                     "message": format!("{e}"),
@@ -326,6 +329,7 @@ fn cmd_resume(
 
     if json_mode {
         let json = serde_json::json!({
+            "schema_version": JSON_SCHEMA_VERSION,
             "ok": true,
             "source_provider": result.source_provider,
             "target_provider": result.target_provider,
@@ -461,6 +465,7 @@ fn cmd_list(
 
         fn to_json(&self) -> serde_json::Value {
             serde_json::json!({
+                "schema_version": JSON_SCHEMA_VERSION,
                 "session_id": self.session_id,
                 "provider": self.provider,
                 "title": self.title,
@@ -1347,6 +1352,7 @@ fn cmd_info(session_id: &str, json_mode: bool, enrich_fs: bool) -> anyhow::Resul
 
     if json_mode {
         let json = serde_json::json!({
+            "schema_version": JSON_SCHEMA_VERSION,
             "session_id": session.session_id,
             "provider": session.provider_slug,
             "title": session.title,
@@ -1416,6 +1422,7 @@ fn cmd_providers(json_mode: bool) -> anyhow::Result<()> {
             .iter()
             .map(|(p, det)| {
                 serde_json::json!({
+                    "schema_version": JSON_SCHEMA_VERSION,
                     "name": p.name(),
                     "slug": p.slug(),
                     "alias": p.cli_alias(),

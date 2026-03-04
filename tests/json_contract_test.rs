@@ -13,6 +13,8 @@ use std::path::PathBuf;
 use assert_cmd::Command;
 use tempfile::TempDir;
 
+const EXPECTED_JSON_SCHEMA_VERSION: u64 = 1;
+
 // ---------------------------------------------------------------------------
 // Helpers (fixture setup, command builder)
 // ---------------------------------------------------------------------------
@@ -199,6 +201,16 @@ fn assert_uint(val: &serde_json::Value, field: &str, ctx: &str) {
     );
 }
 
+/// Assert schema_version exists and matches the expected contract version.
+fn assert_schema_version(obj: &serde_json::Value, ctx: &str) {
+    assert_uint(&obj["schema_version"], "schema_version", ctx);
+    assert_eq!(
+        obj["schema_version"].as_u64(),
+        Some(EXPECTED_JSON_SCHEMA_VERSION),
+        "{ctx}: schema_version mismatch"
+    );
+}
+
 /// Assert a JSON object contains exactly the expected keys (no extra, no missing).
 fn assert_exact_keys(obj: &serde_json::Value, expected: &[&str], ctx: &str) {
     let map = obj
@@ -219,15 +231,24 @@ fn assert_exact_keys(obj: &serde_json::Value, expected: &[&str], ctx: &str) {
 // ---------------------------------------------------------------------------
 // Contract: `providers --json`
 // ---------------------------------------------------------------------------
-// Expected shape: Array of {name, slug, alias, installed, version, evidence}
+// Expected shape: Array of {schema_version, name, slug, alias, installed, version, evidence}
 
 fn assert_provider_object(obj: &serde_json::Value, idx: usize) {
     let ctx = format!("providers[{idx}]");
     assert_exact_keys(
         obj,
-        &["name", "slug", "alias", "installed", "version", "evidence"],
+        &[
+            "schema_version",
+            "name",
+            "slug",
+            "alias",
+            "installed",
+            "version",
+            "evidence",
+        ],
         &ctx,
     );
+    assert_schema_version(obj, &ctx);
     assert_string(&obj["name"], "name", &ctx);
     assert_string(&obj["slug"], "slug", &ctx);
     assert_string(&obj["alias"], "alias", &ctx);
@@ -342,7 +363,7 @@ fn contract_providers_aliases_match_slugs() {
 // ---------------------------------------------------------------------------
 // Contract: `list --json`
 // ---------------------------------------------------------------------------
-// Expected shape: Array of {session_id, provider, title, workspace_name, workspace_name_source, repo_name, messages, workspace, started_at, path}
+// Expected shape: Array of {schema_version, session_id, provider, title, workspace_name, workspace_name_source, repo_name, messages, workspace, started_at, path}
 
 fn assert_list_item(obj: &serde_json::Value, idx: usize) {
     let ctx = format!("list[{idx}]");
@@ -352,6 +373,7 @@ fn assert_list_item(obj: &serde_json::Value, idx: usize) {
             "session_id",
             "provider",
             "title",
+            "schema_version",
             "workspace_name",
             "workspace_name_source",
             "repo_name",
@@ -369,6 +391,7 @@ fn assert_list_item(obj: &serde_json::Value, idx: usize) {
         ],
         &ctx,
     );
+    assert_schema_version(obj, &ctx);
     assert_string(&obj["session_id"], "session_id", &ctx);
     assert_string(&obj["provider"], "provider", &ctx);
     assert_string_or_null(&obj["title"], "title", &ctx);
@@ -509,7 +532,7 @@ fn contract_list_json_messages_is_nonnegative() {
 // ---------------------------------------------------------------------------
 // Contract: `info --json`
 // ---------------------------------------------------------------------------
-// Expected shape: {session_id, provider, title, workspace_name, workspace_name_source, repo_name, workspace, messages, started_at,
+// Expected shape: {schema_version, session_id, provider, title, workspace_name, workspace_name_source, repo_name, workspace, messages, started_at,
 //                  ended_at, model_name, source_path, metadata}
 
 fn assert_info_object(obj: &serde_json::Value) {
@@ -520,6 +543,7 @@ fn assert_info_object(obj: &serde_json::Value) {
             "session_id",
             "provider",
             "title",
+            "schema_version",
             "workspace_name",
             "workspace_name_source",
             "repo_name",
@@ -533,6 +557,7 @@ fn assert_info_object(obj: &serde_json::Value) {
         ],
         ctx,
     );
+    assert_schema_version(obj, ctx);
     assert_string(&obj["session_id"], "session_id", ctx);
     assert_string(&obj["provider"], "provider", ctx);
     assert_string_or_null(&obj["title"], "title", ctx);
@@ -639,7 +664,7 @@ fn contract_info_json_source_path_is_absolute() {
 // ---------------------------------------------------------------------------
 // Contract: `resume --json` (success)
 // ---------------------------------------------------------------------------
-// Expected shape: {ok, source_provider, target_provider, source_session_id,
+// Expected shape: {schema_version, ok, source_provider, target_provider, source_session_id,
 //                  target_session_id, written_paths, resume_command, dry_run, warnings}
 
 fn assert_resume_success_object(obj: &serde_json::Value) {
@@ -647,6 +672,7 @@ fn assert_resume_success_object(obj: &serde_json::Value) {
     assert_exact_keys(
         obj,
         &[
+            "schema_version",
             "ok",
             "source_provider",
             "target_provider",
@@ -659,6 +685,7 @@ fn assert_resume_success_object(obj: &serde_json::Value) {
         ],
         ctx,
     );
+    assert_schema_version(obj, ctx);
     assert_bool(&obj["ok"], "ok", ctx);
     assert_eq!(obj["ok"], true, "{ctx}: ok should be true");
     assert_string(&obj["source_provider"], "source_provider", ctx);
@@ -807,11 +834,12 @@ fn contract_resume_json_gemini_to_codex() {
 // ---------------------------------------------------------------------------
 // Contract: error JSON envelope
 // ---------------------------------------------------------------------------
-// Expected shape: {ok: false, error_type: string, message: string}
+// Expected shape: {schema_version, ok: false, error_type: string, message: string}
 
 fn assert_error_envelope(obj: &serde_json::Value) {
     let ctx = "error_envelope";
-    assert_exact_keys(obj, &["ok", "error_type", "message"], ctx);
+    assert_exact_keys(obj, &["schema_version", "ok", "error_type", "message"], ctx);
+    assert_schema_version(obj, ctx);
     assert_bool(&obj["ok"], "ok", ctx);
     assert_eq!(obj["ok"], false, "{ctx}: ok should be false");
     assert_string(&obj["error_type"], "error_type", ctx);
