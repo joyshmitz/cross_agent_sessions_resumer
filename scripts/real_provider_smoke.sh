@@ -281,7 +281,7 @@ source_session_for_alias() {
     if [[ "$LAST_EXIT" -eq 0 ]]; then
         while IFS= read -r sid; do
             [[ -n "$sid" ]] && candidate_ids+=("$sid")
-        done < <(jq -r '.[].session_id // empty' "$LAST_STDOUT_FILE" 2>/dev/null || true)
+        done < <(jq -r 'if type=="array" then .[] else (.items // [])[] end | .session_id // empty' "$LAST_STDOUT_FILE" 2>/dev/null || true)
     fi
 
     local seen_ids="|"
