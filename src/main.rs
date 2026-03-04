@@ -730,20 +730,20 @@ fn cmd_list(
 
     fn provider_display(provider: &str) -> &str {
         match provider {
-            "claude-code" => "claude-code",
-            "codex" => "codex",
-            "gemini" => "gemini",
-            "cursor" => "cursor",
-            "cline" => "cline",
-            "aider" => "aider",
-            "amp" => "amp",
-            "opencode" => "opencode",
-            "chatgpt" => "chatgpt",
-            "clawdbot" => "clawdbot",
-            "vibe" => "vibe",
-            "factory" => "factory",
-            "openclaw" => "openclaw",
-            "pi-agent" => "pi-agent",
+            "claude-code" => "Claude Code",
+            "codex" => "Codex",
+            "gemini" => "Gemini",
+            "cursor" => "Cursor",
+            "cline" => "Cline",
+            "aider" => "Aider",
+            "amp" => "Amp",
+            "opencode" => "OpenCode",
+            "chatgpt" => "ChatGPT",
+            "clawdbot" => "ClawdBot",
+            "vibe" => "Vibe",
+            "factory" => "Factory",
+            "openclaw" => "OpenClaw",
+            "pi-agent" => "Pi-Agent",
             _ => provider,
         }
     }
@@ -1013,6 +1013,8 @@ fn cmd_list(
 
     let mut sessions: Vec<SessionSummary> = Vec::new();
 
+    const LIST_PARSE_PARALLEL_THRESHOLD: usize = 256;
+
     for provider in &installed {
         tracing::debug!(provider = provider.slug(), "scanning provider for sessions");
         if let Some(filter_slug) = provider_filter_slug.as_deref()
@@ -1035,16 +1037,31 @@ fn cmd_list(
             }
 
             let provider_slug = provider.slug().to_string();
-            let parsed: Vec<SessionSummary> = listed
-                .into_par_iter()
-                .filter_map(|(_session_id, path)| {
-                    if !workspace_hint_matches(&provider_slug, &path, workspace_filter.as_ref()) {
-                        return None;
-                    }
-                    let session = provider.read_session(&path).ok()?;
-                    Some(build_summary(&provider_slug, path, session))
-                })
-                .collect();
+            let parsed: Vec<SessionSummary> = if listed.len() < LIST_PARSE_PARALLEL_THRESHOLD {
+                listed
+                    .into_iter()
+                    .filter_map(|(_session_id, path)| {
+                        if !workspace_hint_matches(&provider_slug, &path, workspace_filter.as_ref())
+                        {
+                            return None;
+                        }
+                        let session = provider.read_session(&path).ok()?;
+                        Some(build_summary(&provider_slug, path, session))
+                    })
+                    .collect()
+            } else {
+                listed
+                    .into_par_iter()
+                    .filter_map(|(_session_id, path)| {
+                        if !workspace_hint_matches(&provider_slug, &path, workspace_filter.as_ref())
+                        {
+                            return None;
+                        }
+                        let session = provider.read_session(&path).ok()?;
+                        Some(build_summary(&provider_slug, path, session))
+                    })
+                    .collect()
+            };
             sessions.extend(parsed);
             continue;
         }
@@ -1090,13 +1107,23 @@ fn cmd_list(
         }
 
         let provider_slug = provider.slug().to_string();
-        let parsed: Vec<SessionSummary> = candidate_paths
-            .into_par_iter()
-            .filter_map(|path| {
-                let session = provider.read_session(&path).ok()?;
-                Some(build_summary(&provider_slug, path, session))
-            })
-            .collect();
+        let parsed: Vec<SessionSummary> = if candidate_paths.len() < LIST_PARSE_PARALLEL_THRESHOLD {
+            candidate_paths
+                .into_iter()
+                .filter_map(|path| {
+                    let session = provider.read_session(&path).ok()?;
+                    Some(build_summary(&provider_slug, path, session))
+                })
+                .collect()
+        } else {
+            candidate_paths
+                .into_par_iter()
+                .filter_map(|path| {
+                    let session = provider.read_session(&path).ok()?;
+                    Some(build_summary(&provider_slug, path, session))
+                })
+                .collect()
+        };
         sessions.extend(parsed);
     }
 
@@ -1186,7 +1213,7 @@ fn cmd_list(
             let provider = provider_display(provider_slug);
             console.print(&format!(
                 "[bold]{}[/]: {} session(s)",
-                provider.to_uppercase(),
+                provider,
                 provider_sessions.len()
             ));
 
