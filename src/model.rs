@@ -285,7 +285,7 @@ pub fn normalize_role(role_str: &str) -> MessageRole {
         "user" => MessageRole::User,
         "assistant" | "model" | "agent" | "gemini" => MessageRole::Assistant,
         "tool" => MessageRole::Tool,
-        "system" => MessageRole::System,
+        "system" | "developer" => MessageRole::System,
         other => MessageRole::Other(other.to_string()),
     }
 }

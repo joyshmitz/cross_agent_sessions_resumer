@@ -470,16 +470,21 @@ impl Provider for PiAgent {
             }
 
             // Add usage field with proper structure to prevent TypeError in Pi
-            // when accessing usage.input.
-            let usage = if let Some(usage_val) = msg.extra.get("usage") {
-                usage_val.clone()
-            } else {
-                serde_json::json!({
-                    "input": 0,
-                    "output": 0,
-                    "total": 0
-                })
-            };
+            // when accessing usage.input. Pi-Agent stores usage inside the
+            // nested "message" object, so check both envelope and inner levels.
+            let usage = msg
+                .extra
+                .get("message")
+                .and_then(|m| m.get("usage"))
+                .or_else(|| msg.extra.get("usage"))
+                .cloned()
+                .unwrap_or_else(|| {
+                    serde_json::json!({
+                        "input": 0,
+                        "output": 0,
+                        "total": 0
+                    })
+                });
             inner["usage"] = usage;
 
             let ts_str = msg
