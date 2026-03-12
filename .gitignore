@@ -78,3 +78,6 @@ gemini.mcp.json
 .beads/*.pre_repair_*
 .beads/*.repair_candidate_*
 .beads/*.bak-corrupt
+
+# One-off test shell scripts at repo root
+/test_*.sh
