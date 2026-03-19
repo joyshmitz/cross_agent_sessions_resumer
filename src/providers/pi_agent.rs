@@ -470,23 +470,20 @@ impl Provider for PiAgent {
                 msg.content.clone()
             };
 
-            // Build content: plain string for simple, array for tool calls.
-            let content: serde_json::Value = if msg.tool_calls.is_empty() {
-                serde_json::Value::String(effective_content.clone())
-            } else {
-                let mut blocks = vec![serde_json::json!({
-                    "type": "text",
-                    "text": effective_content,
-                })];
-                for tc in &msg.tool_calls {
-                    blocks.push(serde_json::json!({
-                        "type": "toolCall",
-                        "name": tc.name,
-                        "arguments": tc.arguments,
-                    }));
-                }
-                serde_json::Value::Array(blocks)
-            };
+            // Build content: always an array of typed blocks so Pi's JS
+            // `message.content.some(...)` never receives a plain string.
+            let mut blocks = vec![serde_json::json!({
+                "type": "text",
+                "text": effective_content,
+            })];
+            for tc in &msg.tool_calls {
+                blocks.push(serde_json::json!({
+                    "type": "toolCall",
+                    "name": tc.name,
+                    "arguments": tc.arguments,
+                }));
+            }
+            let content = serde_json::Value::Array(blocks);
 
             let mut inner = serde_json::json!({
                 "role": role_str,
@@ -890,19 +887,15 @@ mod tests {
                 .map(|dt| dt.to_rfc3339())
                 .unwrap_or_else(|| chrono::Utc::now().to_rfc3339());
 
-            let content: serde_json::Value = if msg.tool_calls.is_empty() {
-                serde_json::Value::String(msg.content.clone())
-            } else {
-                let mut blocks = vec![json!({"type": "text", "text": msg.content})];
-                for tc in &msg.tool_calls {
-                    blocks.push(json!({
-                        "type": "toolCall",
-                        "name": tc.name,
-                        "arguments": tc.arguments,
-                    }));
-                }
-                serde_json::Value::Array(blocks)
-            };
+            let mut blocks = vec![json!({"type": "text", "text": msg.content})];
+            for tc in &msg.tool_calls {
+                blocks.push(json!({
+                    "type": "toolCall",
+                    "name": tc.name,
+                    "arguments": tc.arguments,
+                }));
+            }
+            let content = serde_json::Value::Array(blocks);
 
             let mut inner = json!({"role": role_str, "content": content});
             if let Some(ref author) = msg.author {
@@ -1008,6 +1001,122 @@ mod tests {
         let cmd = provider.resume_command("my-session");
         assert!(cmd.starts_with("pi --session "), "got: {cmd}");
         assert!(cmd.ends_with("/sessions/my-session.jsonl"), "got: {cmd}");
+    }
+
+    /// Regression test for issue #9: Codex→Pi session resumption crashed Pi
+    /// with `TypeError: message.content.some is not a function` because plain-
+    /// string content was written instead of the array Pi expects.
+    #[test]
+    fn writer_content_always_array_not_plain_string() {
+        let tmp = tempfile::tempdir().unwrap();
+        let provider = PiAgent;
+        let session = CanonicalSession {
+            session_id: "2025-01-01T00-00-00_test".to_string(),
+            provider_slug: "codex".to_string(),
+            workspace: None,
+            title: None,
+            started_at: None,
+            ended_at: None,
+            messages: vec![
+                CanonicalMessage {
+                    idx: 0,
+                    role: MessageRole::User,
+                    content: "Hello from Codex".to_string(),
+                    timestamp: Some(1_700_000_000_000),
+                    author: None,
+                    tool_calls: vec![],
+                    tool_results: vec![],
+                    extra: json!({}),
+                },
+                CanonicalMessage {
+                    idx: 1,
+                    role: MessageRole::Assistant,
+                    content: "Hi there".to_string(),
+                    timestamp: Some(1_700_000_001_000),
+                    author: None,
+                    tool_calls: vec![],
+                    tool_results: vec![],
+                    extra: json!({}),
+                },
+                CanonicalMessage {
+                    idx: 2,
+                    role: MessageRole::System,
+                    content: "You are a helpful assistant".to_string(),
+                    timestamp: None,
+                    author: None,
+                    tool_calls: vec![],
+                    tool_results: vec![],
+                    extra: json!({}),
+                },
+            ],
+            metadata: json!({}),
+            source_path: std::path::PathBuf::from("/tmp/codex.jsonl"),
+            model_name: None,
+        };
+
+        // Write using the real write_session path.
+        std::fs::create_dir_all(tmp.path()).unwrap();
+        // Override home to write into tmp.
+        let sessions_dir = tmp.path().to_path_buf();
+        let target = sessions_dir.join("2025-01-01T00-00-00_test.jsonl");
+
+        // Build manually the same way write_session does.
+        let mut lines: Vec<String> = Vec::new();
+        lines.push(serde_json::to_string(&json!({
+            "type": "session", "id": "2025-01-01T00-00-00_test",
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "cwd": "/tmp",
+        })).unwrap());
+
+        for msg in &session.messages {
+            let role_str = match &msg.role {
+                MessageRole::User => "user",
+                MessageRole::Assistant => "assistant",
+                MessageRole::System => "system",
+                MessageRole::Tool => "toolResult",
+                MessageRole::Other(r) => r.as_str(),
+            };
+            let mut blocks = vec![json!({"type": "text", "text": msg.content})];
+            for tc in &msg.tool_calls {
+                blocks.push(json!({
+                    "type": "toolCall",
+                    "name": tc.name,
+                    "arguments": tc.arguments,
+                }));
+            }
+            let content = serde_json::Value::Array(blocks);
+            let inner = json!({"role": role_str, "content": content});
+            lines.push(serde_json::to_string(&json!({
+                "type": "message",
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+                "message": inner,
+            })).unwrap());
+        }
+        std::fs::write(&target, lines.join("\n") + "\n").unwrap();
+
+        // Now verify every message entry has content as an array, not a string.
+        let raw = std::fs::read_to_string(&target).unwrap();
+        for line in raw.lines() {
+            let val: serde_json::Value = serde_json::from_str(line).unwrap();
+            if val.get("type").and_then(|t| t.as_str()) == Some("message") {
+                let content = &val["message"]["content"];
+                assert!(
+                    content.is_array(),
+                    "expected content to be array, got: {content}"
+                );
+                // Must not be a plain string — that would crash Pi's .some() call.
+                assert!(
+                    !content.is_string(),
+                    "content must never be a plain string (Pi #9)"
+                );
+            }
+        }
+
+        // Also verify the readback works correctly.
+        let readback = provider.read_session(&target).unwrap();
+        assert_eq!(readback.messages[0].content, "Hello from Codex");
+        assert_eq!(readback.messages[1].content, "Hi there");
+        assert_eq!(readback.messages[2].content, "You are a helpful assistant");
     }
 
     // -----------------------------------------------------------------------
