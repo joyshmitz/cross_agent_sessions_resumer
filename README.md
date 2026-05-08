@@ -684,7 +684,7 @@ Community-built shortcuts that wrap `casr` for one-keystroke session forking:
 
 - **iTerm2 (macOS)** — [pirate/iterm-agent-fork](https://github.com/pirate/iterm-agent-fork): native iTerm hotkey to fork the active session into a different coding agent via `casr`.
 
-These are external projects, not maintained here. PRs to add other terminal/editor integrations to this list are welcome.
+These are external projects, not maintained here. If you've built a similar integration and want it linked here, file an issue with the URL — see the [Contributions](#about-contributions) policy below.
 
 ## FAQ
 
