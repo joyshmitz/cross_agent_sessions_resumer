@@ -113,6 +113,7 @@ impl ProviderRegistry {
             Box::new(crate::providers::factory::Factory),
             Box::new(crate::providers::openclaw::OpenClaw),
             Box::new(crate::providers::pi_agent::PiAgent),
+            Box::new(crate::providers::kiro::Kiro),
         ])
     }
 

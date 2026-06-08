@@ -98,6 +98,7 @@ claude --resume <new-session-id>
 | Factory | `fac` | Yes | Yes | `factory --resume <session-id>` |
 | OpenClaw | `ocl` | Yes | Yes | `openclaw --resume <session-id>` |
 | Pi-Agent | `pi` | Yes | Yes | `pi --session <path-to-session.jsonl>` |
+| Kiro CLI | `kr` | Yes | Yes | `kiro-cli --resume-id <session-id>` |
 
 Notes:
 - Initial core focus is Claude Code, Codex, and Gemini CLI.
