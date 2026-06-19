@@ -461,7 +461,8 @@ cross_agent_session_resumer/
 - Core aliases:
   - `cc` -> Claude Code
   - `cod` -> Codex
-  - `gmi` -> Gemini CLI
+  - `agy` -> Antigravity CLI (read/resume only; `agy --conversation <uuid> --model "Gemini 3.1 Pro (High)"`)
+  - `gmi` -> Gemini CLI (legacy)
 - Provider home overrides:
   - `CLAUDE_HOME`
   - `CODEX_HOME`
